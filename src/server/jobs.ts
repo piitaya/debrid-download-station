@@ -228,8 +228,11 @@ export class JobManager {
     await this.deleteFromDebrid(job);
   }
 
+  /** Removes completed and cancelled jobs (failed ones stay, to be retried or removed). */
   clearFinished(owner: string): void {
-    const removed = this.jobs.filter((job) => job.owner === owner && !isActive(job));
+    const removed = this.jobs.filter(
+      (job) => job.owner === owner && (job.status === 'completed' || job.status === 'cancelled'),
+    );
     if (!removed.length) return;
     this.deps.file.data.jobs = this.jobs.filter((job) => !removed.includes(job));
     this.deps.file.save();

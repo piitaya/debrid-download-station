@@ -286,11 +286,13 @@ export const sharedStyles = css`
     color: var(--text-secondary);
   }
 
+  /* Keeps a finger-sized target without growing the header. */
   .section-header .btn-plain {
-    min-height: 24px;
-    margin: -4px -8px -4px 0;
-    padding: 0 8px;
-    font-size: 13px;
+    min-height: 36px;
+    margin: -10px -10px -10px 0;
+    padding: 0 10px;
+    font-size: 15px;
+    font-weight: 400;
   }
 
   .section-footer {

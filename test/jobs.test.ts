@@ -219,6 +219,30 @@ describe('JobManager', () => {
     expect(provider.torrents.get(job.debridId)?.deleted).toBe(true);
   });
 
+  it('clears finished jobs but keeps failed ones', async () => {
+    const { jobs, provider } = setup();
+    provider.nextDead = true;
+    const failed = jobs.create({
+      owner: 'paul',
+      provider: 'alldebrid',
+      debridId: (await provider.addMagnet()).id,
+      name: 'x',
+      category,
+    });
+    await run(jobs);
+    expect(failed.status).toBe('error');
+    const done = jobs.create({
+      owner: 'paul',
+      provider: 'alldebrid',
+      debridId: 'y',
+      name: 'y',
+      category,
+    });
+    done.status = 'completed';
+    jobs.clearFinished('paul');
+    expect(jobs.list('paul')).toEqual([failed]);
+  });
+
   it('keeps each user to their own jobs', async () => {
     const { jobs, provider } = setup();
     const job = jobs.create({

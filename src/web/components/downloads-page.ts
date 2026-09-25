@@ -46,13 +46,7 @@ export class DdsDownloadsPage extends LitElement {
     const ids = store.jobs.filter(isFinished).map((job) => job.id);
     this.clearing = true;
     try {
-      // The server's clear also drops failed jobs, which are listed with the running ones to
-      // be retried: remove the finished ones one by one when there are some.
-      if (store.jobs.some((job) => job.status === 'error')) {
-        await Promise.all(ids.map((id) => api.deleteJob(id, false)));
-      } else {
-        await api.clearJobs();
-      }
+      await api.clearJobs();
       store.removeJobs(ids);
     } catch (error) {
       store.toast(errorMessage(error instanceof ApiError ? error.info.code : 'internal'), 'error');

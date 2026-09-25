@@ -276,7 +276,7 @@ export class DdsSettingsPage extends LitElement {
       <span class="row-icon"><dds-icon .path=${categoryIcon(category.icon)}></dds-icon></span>
       <span class="row-main">
         <span class="title-line">
-          <span class="row-title wrap">${category.name}</span>
+          <span class="row-title wrap">${breakable(category.name)}</span>
           ${isDefault ? html`<span class="row-value">${t('settings.default')}</span>` : nothing}
         </span>
         <span class="row-subtitle">${breakable(category.destination)}</span>

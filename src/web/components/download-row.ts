@@ -307,10 +307,14 @@ export class DdsDownloadRow extends LitElement {
         margin: 6px 0 2px;
       }
 
-      /* Same width on every row with a bar (even without a figure), so the bars line up. */
+      /*
+       * Same width on every row with a bar (even without a figure), so the bars line up. Sized
+       * for two digits: « 100 % » only shows for a moment.
+       */
       .percent {
         flex: none;
-        min-width: 2.8em;
+        min-width: 2.3em;
+        margin-left: -4px;
         font-size: 13px;
         font-weight: 600;
         text-align: right;
