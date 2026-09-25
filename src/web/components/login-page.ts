@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { ApiError } from '../api.js';
 import { errorMessage, t } from '../i18n.js';
-import { mdiAlertCircleOutline, mdiShieldKeyOutline } from '../icons.js';
+import { mdiAlertCircleOutline } from '../icons.js';
 import { store } from '../store.js';
 import './icon.js';
 import './logo.js';
@@ -50,19 +50,19 @@ export class DdsLoginPage extends LitElement {
 
   override render() {
     return html`
-      <div class="wrap">
-        <form class="card" @submit=${this.submit}>
-          <div class="head">
-            <dds-logo size="64"></dds-logo>
-            <h1>${t('app.title')}</h1>
-            <p class="muted">${t('login.subtitle')}</p>
-          </div>
+      <main>
+        <form @submit=${this.submit}>
+          <header>
+            <dds-logo size="56"></dds-logo>
+            <h1>${t('app.name')}</h1>
+            <p class="secondary">${t('login.subtitle')}</p>
+          </header>
 
-          <label class="field">
-            ${t('login.username')}
+          <div class="group fields">
             <input
-              class="input"
               name="username"
+              placeholder=${t('login.username')}
+              aria-label=${t('login.username')}
               autocomplete="username"
               autocapitalize="none"
               autocorrect="off"
@@ -70,91 +70,76 @@ export class DdsLoginPage extends LitElement {
               required
               ?disabled=${this.busy}
             />
-          </label>
-          <label class="field">
-            ${t('login.password')}
             <input
-              class="input"
               name="password"
               type="password"
+              placeholder=${t('login.password')}
+              aria-label=${t('login.password')}
               autocomplete="current-password"
               required
               ?disabled=${this.busy}
             />
-          </label>
-
-          ${
-            this.needOtp
-              ? html`<label class="field otp">
-                  <span class="otp-label">
-                    <dds-icon .path=${mdiShieldKeyOutline}></dds-icon>${t('login.otp')}
-                  </span>
-                  <input
-                    class="input"
+            ${
+              this.needOtp
+                ? html`<input
                     name="otp"
+                    class="otp"
+                    placeholder=${t('login.otp')}
+                    aria-label=${t('login.otp')}
                     inputmode="numeric"
                     autocomplete="one-time-code"
-                    pattern="[0-9]*"
+                    pattern="[0-9 ]*"
                     maxlength="8"
                     required
                     ?disabled=${this.busy}
-                  />
-                  <span class="hint">${t('login.otpHint')}</span>
-                </label>`
-              : nothing
-          }
+                  />`
+                : nothing
+            }
+          </div>
+          ${this.needOtp ? html`<p class="hint small secondary">${t('login.otpHint')}</p>` : nothing}
           ${
             this.error
-              ? html`<div class="error-box" role="alert">
+              ? html`<div class="notice" role="alert">
                   <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
                   <span>${this.error}</span>
                 </div>`
               : nothing
           }
 
-          <button class="btn btn-primary btn-lg btn-block" ?disabled=${this.busy}>
+          <button class="btn btn-primary btn-block submit" ?disabled=${this.busy}>
             ${this.busy ? html`<span class="spinner"></span>` : t('login.submit')}
           </button>
         </form>
-      </div>
+      </main>
     `;
   }
 
   static override styles = [
     sharedStyles,
     css`
-      .wrap {
+      main {
         display: grid;
         place-items: center;
         min-height: 100vh;
         min-height: 100dvh;
-        padding: calc(24px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+        padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
       }
 
       form {
         display: grid;
         gap: 16px;
-        width: min(400px, 100%);
-        padding: 32px 24px 24px;
-        animation: rise 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
+        width: min(360px, 100%);
       }
 
-      @keyframes rise {
-        from {
-          opacity: 0;
-          transform: translateY(16px);
-        }
-      }
-
-      .head {
+      header {
         display: grid;
         justify-items: center;
         gap: 6px;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
         text-align: center;
       }
 
-      .head dds-logo {
+      header dds-logo {
         margin-bottom: 10px;
       }
 
@@ -164,35 +149,45 @@ export class DdsLoginPage extends LitElement {
         letter-spacing: -0.01em;
       }
 
-      .otp {
-        animation: rise 0.3s ease;
+      .fields input {
+        display: block;
+        width: 100%;
+        min-height: var(--row-height);
+        padding: 0 16px;
+        border: none;
+        font: inherit;
+        font-size: 16px;
+        color: var(--text);
+        background: transparent;
+        outline: none;
       }
 
-      .otp-label {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
+      .fields input + input {
+        border-top: 0.5px solid var(--separator);
       }
 
-      .otp-label dds-icon {
-        --icon-size: 18px;
-        color: var(--accent);
+      .fields input::placeholder {
+        color: var(--text-tertiary);
       }
 
-      .otp .input {
-        font-size: 22px;
-        letter-spacing: 0.3em;
-        text-align: center;
+      .fields:focus-within {
+        box-shadow: var(--focus-ring);
+      }
+
+      .fields .otp {
+        letter-spacing: 0.2em;
       }
 
       .hint {
-        font-weight: 400;
-        font-size: 13px;
-        color: var(--text-3);
+        margin-top: -8px;
+        padding: 0 16px;
       }
 
-      button {
+      .submit {
+        min-height: 50px;
         margin-top: 4px;
+        font-size: 17px;
+        border-radius: var(--radius-lg);
       }
     `,
   ];

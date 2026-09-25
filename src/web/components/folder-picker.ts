@@ -1,165 +1,227 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import type { FolderEntry } from '../../shared/types.js';
+import { live } from 'lit/directives/live.js';
+import type { ErrorCode, FolderEntry } from '../../shared/types.js';
 import { api, ApiError } from '../api.js';
-import { errorMessage, t } from '../i18n.js';
-import {
-  mdiChevronRight,
-  mdiClose,
-  mdiFolder,
-  mdiFolderNetworkOutline,
-  mdiFolderPlusOutline,
-} from '../icons.js';
+import { breakable } from '../format.js';
+import { errorMessage, locale, t } from '../i18n.js';
+import { mdiAlertCircleOutline, mdiChevronRight, mdiFolderOutline, mdiPlus } from '../icons.js';
+import { store } from '../store.js';
 import './icon.js';
-import { dialogStyles, sharedStyles } from './styles.js';
+import type { DdsSheet } from './sheet.js';
+import './sheet.js';
+import { sharedStyles } from './styles.js';
 
 /**
- * Browses the NAS shared folders (File Station) and fires `pick` with the chosen
- * Download Station path (`video/Films`).
+ * Normalizes a Download Station path like the server does (`/video//Films/` → `video/Films`);
+ * empty when invalid.
+ */
+export function normalizePath(value: string): string {
+  const parts = value
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.some((part) => part === '.' || part === '..') ? '' : parts.join('/');
+}
+
+const errorCode = (error: unknown): ErrorCode =>
+  error instanceof ApiError ? error.info.code : 'internal';
+
+const byName = (a: FolderEntry, b: FolderEntry) =>
+  a.name.localeCompare(b.name, locale, { numeric: true, sensitivity: 'base' });
+
+/**
+ * Browses the NAS folders. Fires `dds-pick` (`CustomEvent<string>`, a Download Station path such
+ * as `video/Films`) when a folder is chosen.
  */
 @customElement('dds-folder-picker')
 export class DdsFolderPicker extends LitElement {
+  /** Listed folder; null for the shared folders. */
   @state() private path: string | null = null;
   @state() private folders: FolderEntry[] = [];
   @state() private loading = false;
-  @state() private error: string | null = null;
+  @state() private error: ErrorCode | null = null;
+  /** The "new folder" row is being edited. */
   @state() private creating = false;
   @state() private newName = '';
+  @state() private busy = false;
 
-  @query('dialog') private dialog!: HTMLDialogElement;
+  @query('dds-sheet') private sheet!: DdsSheet;
+  @query('.new-folder input') private newInput?: HTMLInputElement;
 
+  /** Ignores the answers of listings that are no longer wanted. */
+  private loadRun = 0;
+
+  /** Opens at `initialPath` when it exists, otherwise at the shared folders. */
   async open(initialPath?: string): Promise<void> {
+    const start = normalizePath(initialPath ?? '');
+    void this.load(start || null, !!start);
     await this.updateComplete;
-    this.dialog.showModal();
-    await this.load(initialPath || null);
-    if (this.error && initialPath) await this.load(null);
+    await this.sheet.show();
   }
 
-  private close(): void {
-    this.dialog.close();
-  }
-
-  private async load(path: string | null): Promise<void> {
-    this.loading = true;
+  private async load(path: string | null, fallBackToShares = false): Promise<void> {
+    const run = ++this.loadRun;
+    this.path = path;
+    this.folders = [];
     this.error = null;
+    this.loading = true;
     this.creating = false;
+    this.newName = '';
     try {
       const listing = await api.folders(path ?? undefined);
+      if (run !== this.loadRun) return;
       this.path = listing.path;
-      this.folders = listing.folders;
+      this.folders = [...listing.folders].sort(byName);
+      this.loading = false;
     } catch (error) {
-      const info = error instanceof ApiError ? error.info : undefined;
-      this.error = [t('picker.error'), info && errorMessage(info.code), info?.message]
-        .filter(Boolean)
-        .join(' ');
-    } finally {
+      if (run !== this.loadRun) return;
+      if (fallBackToShares) return this.load(null);
+      this.error = errorCode(error);
       this.loading = false;
     }
   }
 
-  private pick(): void {
-    if (!this.path) return;
-    this.dispatchEvent(new CustomEvent('pick', { detail: this.path }));
-    this.close();
+  private async startCreating(): Promise<void> {
+    this.creating = true;
+    await this.updateComplete;
+    this.newInput?.focus();
   }
 
-  private async createFolder(event: Event): Promise<void> {
-    event.preventDefault();
+  private stopCreating(): void {
+    this.creating = false;
+    this.newName = '';
+  }
+
+  private async create(): Promise<void> {
     const name = this.newName.trim();
-    if (!this.path || !name) return;
+    if (!name || this.path === null || this.busy) return;
+    this.busy = true;
     try {
       const folder = await api.createFolder(this.path, name);
-      this.newName = '';
+      this.busy = false;
       await this.load(folder.path);
     } catch (error) {
-      this.error = errorMessage(error instanceof ApiError ? error.info.code : 'internal');
+      store.toast(errorMessage(errorCode(error)), 'error');
+    } finally {
+      this.busy = false;
     }
   }
 
+  private onNewKeyDown(event: KeyboardEvent): void {
+    if (event.isComposing) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void this.create();
+    } else if (event.key === 'Escape') {
+      // Leaves the dialog open.
+      event.preventDefault();
+      event.stopPropagation();
+      this.stopCreating();
+    }
+  }
+
+  private onNewBlur(): void {
+    if (!this.newName.trim() && !this.busy) this.stopCreating();
+  }
+
+  private choose(): void {
+    if (this.path === null) return;
+    this.dispatchEvent(new CustomEvent<string>('dds-pick', { detail: this.path }));
+    this.sheet.close();
+  }
+
   override render() {
-    const parts = this.path ? this.path.split('/') : [];
     return html`
-      <dialog @close=${() => (this.creating = false)}>
-        <div class="dialog-head">
-          <h2>${t('picker.title')}</h2>
-          <button class="icon-btn" aria-label=${t('common.close')} @click=${this.close}>
-            <dds-icon .path=${mdiClose}></dds-icon>
-          </button>
-        </div>
-
-        <nav class="crumbs">
-          <button @click=${() => this.load(null)}>${t('picker.shares')}</button>
-          ${parts.map(
-            (part, index) => html`
-              <dds-icon .path=${mdiChevronRight}></dds-icon>
-              <button @click=${() => this.load(parts.slice(0, index + 1).join('/'))}>
-                ${part}
-              </button>
-            `,
-          )}
-        </nav>
-
-        <div class="dialog-body list">
-          ${
-            this.loading
-              ? html`<div class="center"><span class="spinner"></span></div>`
-              : this.error
-                ? html`<p class="error-box">${this.error}</p>`
-                : this.folders.length
-                  ? this.folders.map(
-                      (folder) =>
-                        html`<button class="folder" @click=${() => this.load(folder.path)}>
-                          <dds-icon
-                            .path=${this.path ? mdiFolder : mdiFolderNetworkOutline}
-                          ></dds-icon>
-                          <span class="ellipsis">${folder.name}</span>
-                          <dds-icon class="go" .path=${mdiChevronRight}></dds-icon>
-                        </button>`,
-                    )
-                  : html`<p class="center muted">${t('picker.empty')}</p>`
-          }
-          ${
-            this.path && this.creating
-              ? html`<form class="create" @submit=${this.createFolder}>
-                  <input
-                    class="input"
-                    placeholder=${t('picker.newFolderName')}
-                    .value=${this.newName}
-                    @input=${(event: InputEvent) => {
-                      this.newName = (event.target as HTMLInputElement).value;
-                    }}
-                  />
-                  <button class="btn" ?disabled=${!this.newName.trim()}>
-                    ${t('picker.create')}
-                  </button>
-                </form>`
-              : nothing
-          }
-        </div>
-
-        <div class="dialog-foot">
-          ${
-            this.path && !this.creating
-              ? html`<button class="btn btn-ghost" @click=${() => (this.creating = true)}>
-                  <dds-icon .path=${mdiFolderPlusOutline}></dds-icon>${t('picker.newFolder')}
-                </button>`
-              : nothing
-          }
-          <span class="spacer"></span>
-          <button class="btn btn-primary" ?disabled=${!this.path} @click=${this.pick}>
-            ${t('picker.choose')}
-          </button>
-        </div>
-      </dialog>
+      <dds-sheet
+        heading=${t('picker.title')}
+        primaryLabel=${t('picker.choose')}
+        ?primaryDisabled=${this.path === null || this.loading || !!this.error}
+        @dds-primary=${this.choose}
+      >
+        ${this.renderBreadcrumb()}
+        ${this.error
+          ? html`<div class="notice" role="alert">
+              <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
+              <span>${t('picker.error')} ${errorMessage(this.error)}</span>
+            </div>`
+          : this.renderList()}
+      </dds-sheet>
     `;
+  }
+
+  private renderBreadcrumb() {
+    const parts = this.path ? this.path.split('/') : [];
+    const crumbs = [
+      { label: t('picker.shares'), path: null as string | null },
+      ...parts.map((part, index) => ({ label: part, path: parts.slice(0, index + 1).join('/') })),
+    ];
+    return html`<nav class="crumbs" aria-label=${t('picker.location')}>
+      ${crumbs.map((crumb, index) => {
+        const current = index === crumbs.length - 1;
+        return html`${index ? html`<dds-icon class="separator" .path=${mdiChevronRight}></dds-icon>` : nothing}${current
+            ? html`<span class="crumb current" aria-current="location">${crumb.label}</span>`
+            : html`<button class="btn btn-plain btn-sm crumb" @click=${() => this.load(crumb.path)}>
+                <span>${crumb.label}</span>
+              </button>`}`;
+      })}
+    </nav>`;
+  }
+
+  private renderList() {
+    return html`<div class="group with-icons" aria-busy=${this.loading ? 'true' : 'false'}>
+      ${this.loading
+        ? html`<div class="row message"><span class="spinner"></span></div>`
+        : this.folders.length
+          ? this.folders.map(
+              (folder) =>
+                html`<button class="row" @click=${() => this.load(folder.path)}>
+                  <span class="row-icon"><dds-icon .path=${mdiFolderOutline}></dds-icon></span>
+                  <span class="row-main"><span class="row-title">${breakable(folder.name)}</span></span>
+                  <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
+                </button>`,
+            )
+          : html`<div class="row message">${t('picker.empty')}</div>`}
+      ${this.path !== null && !this.loading ? this.renderNewFolder() : nothing}
+    </div>`;
+  }
+
+  private renderNewFolder() {
+    if (!this.creating) {
+      return html`<button class="row add" @click=${this.startCreating}>
+        <span class="row-icon accent"><dds-icon .path=${mdiPlus}></dds-icon></span>
+        <span class="row-main"><span class="row-title">${t('picker.newFolder')}</span></span>
+      </button>`;
+    }
+    return html`<div class="row new-folder">
+      <span class="row-icon"><dds-icon .path=${mdiFolderOutline}></dds-icon></span>
+      <input
+        class="inline-input"
+        .value=${live(this.newName)}
+        placeholder=${t('picker.newFolderName')}
+        aria-label=${t('picker.newFolderName')}
+        maxlength="255"
+        autocomplete="off"
+        @input=${(event: Event) => (this.newName = (event.target as HTMLInputElement).value)}
+        @keydown=${this.onNewKeyDown}
+        @blur=${this.onNewBlur}
+      />
+      <button
+        class="btn btn-sm btn-primary"
+        ?disabled=${!this.newName.trim() || this.busy}
+        @click=${this.create}
+      >
+        ${this.busy ? html`<span class="spinner"></span>` : t('picker.create')}
+      </button>
+    </div>`;
   }
 
   static override styles = [
     sharedStyles,
-    dialogStyles,
     css`
-      dialog {
-        height: min(640px, calc(100dvh - 48px));
+      .row:focus-visible {
+        box-shadow: inset var(--focus-ring);
       }
 
       .crumbs {
@@ -167,84 +229,88 @@ export class DdsFolderPicker extends LitElement {
         flex-wrap: wrap;
         align-items: center;
         gap: 2px;
-        padding: 0 16px 8px;
-        font-size: 14px;
+        min-height: 30px;
+        margin: 0 0 8px;
+        padding: 0 6px;
       }
 
-      .crumbs button {
-        padding: 6px 6px;
-        border: none;
-        border-radius: 8px;
-        font: inherit;
+      .crumb {
+        max-width: 100%;
+      }
+
+      .crumb span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .crumb.current {
+        padding: 0 10px;
+        overflow: hidden;
+        font-size: 13px;
         font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .separator {
+        --icon-size: 14px;
+        color: var(--text-tertiary);
+      }
+
+      .row-title {
+        overflow-wrap: anywhere;
+      }
+
+      .message {
+        justify-content: center;
+        color: var(--text-secondary);
+      }
+
+      .message .spinner {
+        color: var(--text-tertiary);
+      }
+
+      .add {
         color: var(--accent);
-        background: none;
-        cursor: pointer;
       }
 
-      .crumbs button:last-child {
-        color: var(--text);
+      .new-folder .btn {
+        min-width: 64px;
       }
 
-      .crumbs button:hover {
-        background: var(--accent-soft);
+      .new-folder .spinner {
+        width: 14px;
+        height: 14px;
       }
 
-      .crumbs dds-icon {
-        --icon-size: 16px;
-        color: var(--text-3);
-      }
-
-      .list {
+      .inline-input {
         flex: 1;
-        align-content: start;
-        gap: 4px;
-        padding-top: 0;
-      }
-
-      .folder {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        min-height: 52px;
-        padding: 0 12px;
+        min-width: 0;
+        min-height: 32px;
+        padding: 0;
         border: none;
-        border-radius: 12px;
+        border-radius: 0;
         font: inherit;
-        text-align: left;
+        /* 16px keeps iOS Safari from zooming in on focus. */
+        font-size: 16px;
         color: var(--text);
-        background: none;
-        cursor: pointer;
+        background: transparent;
+        outline: none;
       }
 
-      .folder:hover {
-        background: var(--surface-2);
+      .inline-input:focus-visible {
+        box-shadow: none;
       }
 
-      .folder dds-icon {
-        color: var(--accent);
+      .inline-input::placeholder {
+        color: var(--text-tertiary);
       }
 
-      .folder span {
-        flex: 1;
-      }
-
-      .folder .go {
-        --icon-size: 20px;
-        color: var(--text-3);
-      }
-
-      .center {
-        display: grid;
-        place-items: center;
-        padding: 32px 0;
-        text-align: center;
-      }
-
-      .create {
-        display: flex;
-        gap: 8px;
-        margin-top: 8px;
+      @media (pointer: fine) {
+        .inline-input {
+          font-size: 15px;
+        }
       }
     `,
   ];

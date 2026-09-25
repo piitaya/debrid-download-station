@@ -1,6 +1,10 @@
 import { css } from 'lit';
 
-/** Building blocks shared by every component (they live in shadow roots). */
+/*
+ * Shared building blocks (components live in shadow roots, so every component includes
+ * `sharedStyles`). Visual rules: one accent colour, flat surfaces, no gradients, hairline
+ * separators, 8px spacing grid.
+ */
 export const sharedStyles = css`
   :host {
     display: block;
@@ -19,8 +23,14 @@ export const sharedStyles = css`
   h1,
   h2,
   h3,
-  p {
+  p,
+  ul {
     margin: 0;
+  }
+
+  ul {
+    padding: 0;
+    list-style: none;
   }
 
   a {
@@ -32,32 +42,48 @@ export const sharedStyles = css`
     text-decoration: underline;
   }
 
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
   :focus-visible {
-    outline: 3px solid var(--accent-soft);
-    outline-offset: 2px;
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
-  .card {
-    background: var(--surface);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow);
-    padding: 20px;
+  /* Text */
+  .secondary {
+    color: var(--text-secondary);
   }
 
-  .section-title {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-2);
-  }
-
-  .muted {
-    color: var(--text-2);
+  .tertiary {
+    color: var(--text-tertiary);
   }
 
   .small {
     font-size: 13px;
+  }
+
+  .danger-text {
+    color: var(--danger);
+  }
+
+  .success-text {
+    color: var(--success);
+  }
+
+  .warning-text {
+    color: var(--warning);
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
   }
 
   .ellipsis {
@@ -66,9 +92,8 @@ export const sharedStyles = css`
     white-space: nowrap;
   }
 
-  .mono {
-    font-family: var(--font-mono);
-    font-size: 0.92em;
+  .wrap {
+    overflow-wrap: anywhere;
   }
 
   /* Buttons */
@@ -76,114 +101,115 @@ export const sharedStyles = css`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    min-height: 44px;
-    padding: 0 18px;
+    gap: 6px;
+    min-height: var(--control-height);
+    padding: 0 14px;
     border: none;
-    border-radius: 12px;
-    font: inherit;
+    border-radius: var(--radius);
     font-size: 15px;
     font-weight: 600;
+    line-height: 1;
     color: var(--text);
-    background: var(--surface-2);
+    background: var(--fill);
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
-    transition:
-      transform 0.12s ease,
-      background-color 0.2s ease,
-      opacity 0.2s ease,
-      box-shadow 0.2s ease;
     white-space: nowrap;
+    transition:
+      background-color 0.15s ease,
+      opacity 0.15s ease;
   }
 
   .btn:hover {
-    background: var(--surface-3);
+    background: var(--fill-hover);
   }
 
-  .btn:active:not(:disabled) {
-    transform: scale(0.97);
+  .btn:active {
+    background: var(--fill-pressed);
   }
 
   .btn:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: default;
+    pointer-events: none;
   }
 
   .btn dds-icon {
-    --icon-size: 20px;
+    --icon-size: 18px;
   }
 
   .btn-primary {
-    color: var(--on-accent);
-    background: var(--accent-gradient);
-    box-shadow: 0 8px 20px -8px rgba(99, 102, 241, 0.7);
+    color: var(--text-on-accent);
+    background: var(--accent);
   }
 
-  .btn-primary:hover {
-    background: var(--accent-gradient);
-    box-shadow: 0 10px 24px -8px rgba(99, 102, 241, 0.85);
+  .btn-primary:hover,
+  .btn-primary:active {
+    background: var(--accent-pressed);
   }
 
   .btn-primary:disabled {
-    box-shadow: none;
+    color: var(--text-tertiary);
+    background: var(--fill);
+    opacity: 1;
   }
 
-  .btn-ghost {
-    background: transparent;
+  .btn-plain {
     color: var(--accent);
+    background: transparent;
   }
 
-  .btn-ghost:hover {
-    background: var(--accent-soft);
+  .btn-plain:hover {
+    background: var(--accent-fill);
   }
 
-  .btn-danger {
-    background: var(--danger-soft);
+  .btn-plain:active {
+    background: var(--accent-fill);
+    opacity: 0.8;
+  }
+
+  .btn-destructive {
     color: var(--danger);
+    background: transparent;
   }
 
-  .btn-danger:hover {
-    background: var(--danger-soft);
-    filter: saturate(1.4);
+  .btn-destructive:hover,
+  .btn-destructive:active {
+    background: var(--danger-fill);
+  }
+
+  .btn-sm {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 13px;
+    border-radius: var(--radius-sm);
   }
 
   .btn-block {
     width: 100%;
   }
 
-  .btn-lg {
-    min-height: 52px;
-    font-size: 17px;
-    border-radius: 14px;
-  }
-
-  .btn-sm {
-    min-height: 36px;
-    padding: 0 12px;
-    font-size: 14px;
-    border-radius: 10px;
-  }
-
   .icon-btn {
     display: inline-grid;
+    flex: none;
     place-items: center;
-    width: 44px;
-    height: 44px;
+    width: var(--control-height);
+    height: var(--control-height);
     padding: 0;
     border: none;
-    border-radius: 50%;
-    color: var(--text-2);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
     background: transparent;
     cursor: pointer;
-    transition:
-      background-color 0.2s ease,
-      color 0.2s ease;
+    transition: background-color 0.15s ease;
   }
 
   .icon-btn:hover {
-    background: var(--surface-2);
-    color: var(--text);
+    background: var(--fill);
+  }
+
+  .icon-btn:active {
+    background: var(--fill-hover);
   }
 
   .icon-btn:disabled {
@@ -191,192 +217,310 @@ export const sharedStyles = css`
     cursor: default;
   }
 
-  /* Form fields */
-  label.field {
-    display: grid;
-    gap: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-2);
+  .icon-btn.accent {
+    color: var(--accent);
   }
 
-  .input,
-  textarea.input {
+  .icon-btn dds-icon {
+    --icon-size: 20px;
+  }
+
+  /* Form fields */
+  .field {
+    display: block;
     width: 100%;
-    min-height: 48px;
-    padding: 12px 14px;
-    border: 1.5px solid transparent;
-    border-radius: 12px;
+    min-height: var(--control-height);
+    padding: 8px 12px;
+    border: none;
+    border-radius: var(--radius);
     font: inherit;
-    /* 16px prevents iOS Safari from zooming on focus. */
+    /* 16px keeps iOS Safari from zooming in on focus. */
     font-size: 16px;
     color: var(--text);
-    background: var(--surface-2);
+    background: var(--fill);
     outline: none;
-    transition:
-      border-color 0.2s ease,
-      box-shadow 0.2s ease,
-      background-color 0.2s ease;
+    transition: box-shadow 0.15s ease;
   }
 
-  .input::placeholder {
-    color: var(--text-3);
+  .field::placeholder {
+    color: var(--text-tertiary);
   }
 
-  .input:focus {
-    border-color: var(--accent);
-    background: var(--surface);
-    box-shadow: 0 0 0 4px var(--accent-soft);
+  .field:focus {
+    box-shadow: var(--focus-ring);
   }
 
-  /* Chips */
-  .chips {
+  textarea.field {
+    resize: vertical;
+    line-height: 1.4;
+  }
+
+  @media (pointer: fine) {
+    .field {
+      font-size: 15px;
+    }
+  }
+
+  .label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  /* Grouped lists (iOS settings style) */
+  .section + .section {
+    margin-top: 28px;
+  }
+
+  .section-header {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 24px;
+    padding: 0 16px 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
   }
 
-  .chip {
-    display: inline-flex;
+  .section-header .btn-plain {
+    min-height: 24px;
+    margin: -4px -8px -4px 0;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  .section-footer {
+    padding: 6px 16px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .group {
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--bg-elevated);
+  }
+
+  .row {
+    position: relative;
+    display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 40px;
-    padding: 0 16px 0 12px;
+    gap: 12px;
+    width: 100%;
+    min-height: var(--row-height);
+    padding: 8px 16px;
     border: none;
-    border-radius: 999px;
     font: inherit;
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--text);
-    background: var(--surface-2);
+    text-align: left;
+    color: inherit;
+    background: transparent;
+    text-decoration: none;
+  }
+
+  /* Hairline separators, inset to the text column. */
+  .row + .row::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: var(--separator-inset, 16px);
+    height: 1px;
+    background: var(--separator);
+    transform: scaleY(0.5);
+    transform-origin: top;
+  }
+
+  .group.with-icons {
+    --separator-inset: 56px;
+  }
+
+  button.row,
+  a.row,
+  label.row {
     cursor: pointer;
-    transition:
-      background-color 0.2s ease,
-      color 0.2s ease,
-      transform 0.12s ease,
-      box-shadow 0.2s ease;
   }
 
-  .chip dds-icon {
-    --icon-size: 19px;
-    color: var(--text-2);
-    transition: color 0.2s ease;
+  button.row:hover,
+  a.row:hover,
+  label.row:hover {
+    background: var(--fill);
+    text-decoration: none;
   }
 
-  .chip:hover {
-    background: var(--surface-3);
+  button.row:active,
+  a.row:active {
+    background: var(--fill-hover);
   }
 
-  .chip:active {
-    transform: scale(0.96);
+  button.row:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
-  .chip[aria-pressed='true'] {
-    color: var(--on-accent);
+  .row-icon {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    color: var(--text-secondary);
+    background: var(--fill);
+  }
+
+  .row-icon dds-icon {
+    --icon-size: 18px;
+  }
+
+  .row-icon.accent {
+    color: var(--text-on-accent);
     background: var(--accent);
-    box-shadow: 0 6px 16px -8px var(--accent);
   }
 
-  .chip[aria-pressed='true'] dds-icon {
-    color: var(--on-accent);
+  .row-main {
+    display: grid;
+    flex: 1;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .row-title {
+    font-size: 15px;
+  }
+
+  .row-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  .row-value {
+    flex: none;
+    max-width: 50%;
+    font-size: 15px;
+    color: var(--text-secondary);
+  }
+
+  .chevron {
+    --icon-size: 18px;
+    flex: none;
+    margin-right: -4px;
+    color: var(--text-tertiary);
+  }
+
+  .check {
+    --icon-size: 20px;
+    flex: none;
+    color: var(--accent);
+  }
+
+  .row.destructive {
+    justify-content: center;
+    color: var(--danger);
+  }
+
+  .row.action {
+    justify-content: center;
+    color: var(--accent);
   }
 
   /* Segmented control */
   .segmented {
     display: flex;
-    gap: 4px;
-    padding: 4px;
-    border-radius: 13px;
-    background: var(--surface-2);
+    gap: 2px;
+    padding: 2px;
+    border-radius: 9px;
+    background: var(--fill);
   }
 
   .segmented button {
     flex: 1;
-    min-height: 36px;
-    padding: 0 10px;
+    min-height: 30px;
+    padding: 0 12px;
     border: none;
-    border-radius: 10px;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-2);
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
     background: transparent;
     cursor: pointer;
-    transition:
-      background-color 0.2s ease,
-      color 0.2s ease,
-      box-shadow 0.2s ease;
   }
 
   .segmented button[aria-pressed='true'] {
-    color: var(--text);
-    background: var(--surface);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-  }
-
-  /* Badges */
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 12px;
     font-weight: 600;
-    color: var(--text-2);
-    background: var(--surface-2);
-    white-space: nowrap;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-control);
   }
 
-  .badge dds-icon {
-    --icon-size: 14px;
+  /* Switch */
+  input.switch {
+    position: relative;
+    flex: none;
+    width: 44px;
+    height: 26px;
+    margin: 0;
+    border-radius: 13px;
+    background: var(--fill-pressed);
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
   }
 
-  .badge.success {
-    color: var(--success);
-    background: var(--success-soft);
+  input.switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.2s ease;
   }
 
-  .badge.warning {
-    color: var(--warning);
-    background: var(--warning-soft);
+  input.switch:checked {
+    background: var(--accent);
   }
 
-  .badge.danger {
-    color: var(--danger);
-    background: var(--danger-soft);
+  input.switch:checked::after {
+    transform: translateX(18px);
   }
 
-  .badge.accent {
-    color: var(--accent);
-    background: var(--accent-soft);
+  input.switch:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
-  /* Progress bar */
+  /* Progress */
   .progress {
     position: relative;
-    height: 6px;
+    height: 4px;
     overflow: hidden;
-    border-radius: 999px;
-    background: var(--surface-3);
+    border-radius: 2px;
+    background: var(--fill);
   }
 
   .progress > span {
     position: absolute;
     inset: 0 auto 0 0;
     border-radius: inherit;
-    background: var(--accent-gradient);
-    transition: width 0.6s ease;
+    background: var(--accent);
+    transition: width 0.4s ease;
   }
 
   .progress.indeterminate > span {
-    width: 35%;
-    animation: indeterminate 1.4s ease-in-out infinite;
+    width: 30%;
+    animation: indeterminate 1.2s ease-in-out infinite;
   }
 
   @keyframes indeterminate {
     from {
-      left: -35%;
+      left: -30%;
     }
     to {
       left: 100%;
@@ -384,9 +528,9 @@ export const sharedStyles = css`
   }
 
   .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2.5px solid currentColor;
+    width: 18px;
+    height: 18px;
+    border: 2px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
@@ -398,19 +542,20 @@ export const sharedStyles = css`
     }
   }
 
-  .error-box {
+  /* Inline notice (errors, warnings) */
+  .notice {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: flex-start;
-    padding: 12px 14px;
-    border-radius: 12px;
-    font-size: 14px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
     color: var(--danger);
-    background: var(--danger-soft);
+    background: var(--danger-fill);
   }
 
-  .error-box dds-icon {
-    --icon-size: 20px;
+  .notice dds-icon {
+    --icon-size: 18px;
     flex: none;
   }
 
@@ -420,97 +565,6 @@ export const sharedStyles = css`
     *::after {
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
-    }
-  }
-`;
-
-/** Native <dialog>: bottom sheet on phones, centered card on larger screens. */
-export const dialogStyles = css`
-  dialog {
-    width: 100%;
-    max-width: 100%;
-    max-height: calc(100dvh - 48px);
-    margin: auto 0 0;
-    padding: 0;
-    border: none;
-    border-radius: 24px 24px 0 0;
-    color: var(--text);
-    background: var(--surface);
-    box-shadow: var(--shadow-lg);
-    overflow: hidden;
-  }
-
-  dialog[open] {
-    display: flex;
-    flex-direction: column;
-    animation: sheet-in 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
-  }
-
-  dialog::backdrop {
-    background: rgba(10, 10, 20, 0.45);
-    -webkit-backdrop-filter: blur(4px);
-    backdrop-filter: blur(4px);
-  }
-
-  @keyframes sheet-in {
-    from {
-      transform: translateY(40px);
-      opacity: 0;
-    }
-  }
-
-  .dialog-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 16px 12px 8px 20px;
-  }
-
-  .dialog-head h2 {
-    flex: 1;
-    font-size: 18px;
-    font-weight: 700;
-  }
-
-  .dialog-body {
-    display: grid;
-    gap: 16px;
-    padding: 8px 20px 20px;
-    overflow-y: auto;
-  }
-
-  .dialog-foot {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 20px calc(16px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--border);
-  }
-
-  .dialog-foot .spacer {
-    flex: 1;
-  }
-
-  @media (min-width: 640px) {
-    dialog {
-      width: min(520px, calc(100% - 48px));
-      margin: auto;
-      border-radius: 24px;
-    }
-
-    dialog[open] {
-      animation-name: dialog-in;
-    }
-
-    .dialog-foot {
-      padding-bottom: 16px;
-    }
-
-    @keyframes dialog-in {
-      from {
-        transform: scale(0.96);
-        opacity: 0;
-      }
     }
   }
 `;

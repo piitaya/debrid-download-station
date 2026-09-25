@@ -1,71 +1,97 @@
+/*
+ * Design tokens. One accent colour, neutral surfaces, no gradients.
+ * Components live in shadow roots and read these custom properties.
+ */
 :root {
   color-scheme: light dark;
   --font:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 
-  --bg: #f3f3f8;
-  --glow-1: rgba(99, 102, 241, 0.2);
-  --glow-2: rgba(217, 70, 239, 0.12);
-  --surface: #ffffff;
-  --surface-2: #f0f0f6;
-  --surface-3: #e6e6ef;
-  --header-bg: rgba(243, 243, 248, 0.72);
-  --border: rgba(20, 20, 50, 0.08);
-  --text: #15151c;
-  --text-2: #5d5d6c;
-  --text-3: #92929f;
+  /* Surfaces */
+  --bg: #f2f2f7;
+  --bg-elevated: #ffffff;
+  --bg-bar: rgba(242, 242, 247, 0.82);
+  /* Sheets (modal panels) and the groups inside them */
+  --bg-sheet: #f2f2f7;
+  --bg-sheet-content: #ffffff;
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-hover: rgba(118, 118, 128, 0.18);
+  --fill-pressed: rgba(118, 118, 128, 0.26);
+  --separator: rgba(60, 60, 67, 0.16);
+  --overlay: rgba(0, 0, 0, 0.36);
 
-  --accent: #5a5ff0;
-  --accent-strong: #4a4fe0;
-  --accent-soft: rgba(90, 95, 240, 0.1);
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #d946ef 100%);
-  --on-accent: #ffffff;
+  /* Text */
+  --text: #1c1c1e;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #aeaeb2;
+  --text-on-accent: #ffffff;
 
-  --success: #16a34a;
-  --success-soft: rgba(22, 163, 74, 0.12);
-  --warning: #c26a06;
-  --warning-soft: rgba(217, 119, 6, 0.14);
-  --danger: #dc2626;
-  --danger-soft: rgba(220, 38, 38, 0.1);
+  /* Accent and statuses */
+  --accent: #007aff;
+  --accent-pressed: #0062cc;
+  --accent-fill: rgba(0, 122, 255, 0.12);
+  --success: #248a3d;
+  --warning: #b25000;
+  --danger: #d70015;
+  --danger-fill: rgba(215, 0, 21, 0.1);
 
-  --shadow: 0 1px 2px rgba(20, 20, 50, 0.04), 0 10px 30px -8px rgba(20, 20, 50, 0.1);
-  --shadow-lg: 0 24px 60px -12px rgba(20, 20, 50, 0.28);
-  --radius-lg: 22px;
-  --radius: 14px;
-  --radius-sm: 10px;
-  --backdrop: rgba(10, 10, 20, 0.35);
+  /* Shape */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-control: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.2);
+  --focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.35);
+
+  /* Sizing: bigger touch targets on phones and tablets */
+  --control-height: 36px;
+  --row-height: 44px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --control-height: 44px;
+    --row-height: 52px;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0b0b11;
-    --glow-1: rgba(99, 102, 241, 0.22);
-    --glow-2: rgba(217, 70, 239, 0.1);
-    --surface: #16161f;
-    --surface-2: #1f1f2b;
-    --surface-3: #2a2a38;
-    --header-bg: rgba(11, 11, 17, 0.72);
-    --border: rgba(255, 255, 255, 0.08);
-    --text: #f3f3f8;
-    --text-2: #a7a7b6;
-    --text-3: #6f6f80;
+    --bg: #000000;
+    --bg-elevated: #1c1c1e;
+    --bg-bar: rgba(18, 18, 20, 0.82);
+    --bg-sheet: #1c1c1e;
+    --bg-sheet-content: #2c2c2e;
+    --fill: rgba(118, 118, 128, 0.24);
+    --fill-hover: rgba(118, 118, 128, 0.3);
+    --fill-pressed: rgba(118, 118, 128, 0.38);
+    --separator: rgba(84, 84, 88, 0.55);
+    --overlay: rgba(0, 0, 0, 0.6);
 
-    --accent: #8b8ff8;
-    --accent-strong: #a2a5fa;
-    --accent-soft: rgba(139, 143, 248, 0.16);
+    --text: #f5f5f7;
+    --text-secondary: #98989f;
+    --text-tertiary: #636366;
 
-    --success: #4ade80;
-    --success-soft: rgba(74, 222, 128, 0.14);
-    --warning: #fbbf24;
-    --warning-soft: rgba(251, 191, 36, 0.14);
-    --danger: #f87171;
-    --danger-soft: rgba(248, 113, 113, 0.14);
+    --accent: #0a84ff;
+    --accent-pressed: #409cff;
+    --accent-fill: rgba(10, 132, 255, 0.2);
+    --success: #30d158;
+    --warning: #ff9f0a;
+    --danger: #ff453a;
+    --danger-fill: rgba(255, 69, 58, 0.16);
 
-    --shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
-    --shadow-lg: 0 24px 60px -12px rgba(0, 0, 0, 0.7);
-    --backdrop: rgba(0, 0, 0, 0.55);
+    --shadow-control: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.6);
+    --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.45);
+  }
+}
+
+@media (prefers-color-scheme: dark) and (min-width: 900px) {
+  :root {
+    /* Pure black is right on OLED phones, too harsh on large screens. */
+    --bg: #111113;
   }
 }
 
@@ -85,15 +111,10 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   font-family: var(--font);
-  font-size: 16px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.4;
   color: var(--text);
-  background-color: var(--bg);
-  background-image:
-    radial-gradient(900px 520px at 0% -10%, var(--glow-1), transparent 65%),
-    radial-gradient(800px 480px at 105% -5%, var(--glow-2), transparent 60%);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;

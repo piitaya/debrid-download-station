@@ -19,7 +19,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://localhost:8080' },
+      // Only API calls: a plain '/api' prefix would also catch src/web/api.ts.
+      '^/api/': { target: 'http://localhost:8080' },
     },
   },
 });

@@ -20,8 +20,9 @@ function variant(source: string, rounded: boolean, glyphScale: number): string {
   if (glyphScale !== 1) {
     const offset = 256 * (1 - glyphScale);
     result = result
+      // The first <rect> is the background: scale what is drawn on top of it.
       .replace(
-        /(<rect [^>]*url\(#g\)[^>]*\/>)/,
+        /(<rect [^>]*\/>)/,
         `$1<g transform="translate(${offset} ${offset}) scale(${glyphScale})">`,
       )
       .replace('</svg>', '</g></svg>');

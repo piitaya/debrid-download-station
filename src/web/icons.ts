@@ -1,15 +1,15 @@
 import {
-  mdiAnimationPlay,
+  mdiAnimationPlayOutline,
   mdiApps,
-  mdiBookOpenVariant,
-  mdiDownload,
+  mdiBookOpenVariantOutline,
+  mdiDownloadOutline,
   mdiEarth,
-  mdiFolder,
-  mdiGamepadVariant,
-  mdiMovieOpen,
-  mdiMusic,
+  mdiFolderOutline,
+  mdiGamepadVariantOutline,
+  mdiMovieOpenOutline,
+  mdiMusicNoteOutline,
   mdiSoccer,
-  mdiStar,
+  mdiStarOutline,
   mdiTeddyBear,
   mdiTelevisionClassic,
 } from '@mdi/js';
@@ -18,20 +18,20 @@ import type { CategoryIcon } from '../shared/types.js';
 export * from '@mdi/js';
 
 export const categoryIcons: Record<CategoryIcon, string> = {
-  movie: mdiMovieOpen,
+  movie: mdiMovieOpenOutline,
   tv: mdiTelevisionClassic,
-  anime: mdiAnimationPlay,
+  anime: mdiAnimationPlayOutline,
   kids: mdiTeddyBear,
   documentary: mdiEarth,
-  music: mdiMusic,
-  book: mdiBookOpenVariant,
-  game: mdiGamepadVariant,
+  music: mdiMusicNoteOutline,
+  book: mdiBookOpenVariantOutline,
+  game: mdiGamepadVariantOutline,
   app: mdiApps,
   sport: mdiSoccer,
-  star: mdiStar,
-  download: mdiDownload,
-  folder: mdiFolder,
+  star: mdiStarOutline,
+  download: mdiDownloadOutline,
+  folder: mdiFolderOutline,
 };
 
 export const categoryIcon = (icon: CategoryIcon | null | undefined): string =>
-  (icon && categoryIcons[icon]) || mdiFolder;
+  (icon && categoryIcons[icon]) || mdiFolderOutline;
