@@ -122,7 +122,8 @@ export function progressPercent(job: JobView): string {
 
 /**
  * Status line. On one line (lists), the trailing segments that do not fit are left out whole and
- * the first one is cut with an ellipsis; with `wrap`, the whole text wraps.
+ * the first one is cut with an ellipsis. With `wrap`, lines break inside the first segment or
+ * between segments (never inside « 184 sources »), the dots ending the lines.
  */
 export function renderStatus(
   job: JobView,
@@ -130,15 +131,20 @@ export function renderStatus(
 ): TemplateResult {
   const tone = statusTone(job);
   const parts = statusParts(job, options);
+  const last = parts.length - 1;
+  const segments = options.wrap
+    ? parts.map(
+        (part, index) =>
+          html`${index ? ' ' : ''}<span>${part}${index < last ? '\u00a0·' : ''}</span>`,
+      )
+    : parts.map((part, index) => html`<span>${index ? `· ${part}` : part}</span>`);
   return html`<span class="status ${tone}">
-    ${tone === 'success'
-      ? html`<dds-icon class="status-icon" .path=${mdiCheckCircle}></dds-icon>`
-      : nothing}
-    ${options.wrap
-      ? html`<span class="status-text wrap">${parts.join(' · ')}</span>`
-      : html`<span class="status-text">
-          ${parts.map((part, index) => html`<span>${index ? `· ${part}` : part}</span>`)}
-        </span>`}
+    ${
+      tone === 'success'
+        ? html`<dds-icon class="status-icon" .path=${mdiCheckCircle}></dds-icon>`
+        : nothing
+    }
+    <span class="status-text ${options.wrap ? 'wrap' : ''}">${segments}</span>
   </span>`;
 }
 
@@ -192,6 +198,10 @@ export const statusStyles = css`
     overflow-wrap: anywhere;
   }
 
+  .status-text.wrap > span:first-child {
+    white-space: normal;
+  }
+
   .status.warning {
     color: var(--warning);
   }
@@ -208,10 +218,6 @@ export const statusStyles = css`
   .progress {
     display: block;
   }
-
-  .progress > span {
-    display: block;
-  }
 `;
 
 /** A download in the list: category tile, name, status line, progress, chevron. */
@@ -221,7 +227,6 @@ export class DdsDownloadRow extends LitElement {
 
   override render() {
     const job = this.job;
-    const percent = progressPercent(job);
     return html`
       <button class="row" aria-haspopup="dialog">
         <span class="tile"><dds-icon .path=${categoryIcon(job.categoryIcon)}></dds-icon></span>
@@ -229,7 +234,11 @@ export class DdsDownloadRow extends LitElement {
           <span class="name">${breakable(job.name)}</span>
           ${renderStatus(job)} ${renderProgress(job)}
         </span>
-        ${percent ? html`<span class="percent num">${percent}</span>` : nothing}
+        ${
+          jobProgress(job) === null
+            ? nothing
+            : html`<span class="percent num">${progressPercent(job)}</span>`
+        }
         <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
       </button>
     `;
@@ -298,10 +307,13 @@ export class DdsDownloadRow extends LitElement {
         margin: 6px 0 2px;
       }
 
+      /* Same width on every row with a bar (even without a figure), so the bars line up. */
       .percent {
         flex: none;
+        min-width: 2.8em;
         font-size: 13px;
         font-weight: 600;
+        text-align: right;
         color: var(--text-secondary);
       }
 

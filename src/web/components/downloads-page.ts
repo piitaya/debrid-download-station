@@ -6,13 +6,13 @@ import { api, ApiError } from '../api.js';
 import { errorMessage, t } from '../i18n.js';
 import { mdiCheckCircle, mdiCircleOutline, mdiTrayArrowDown } from '../icons.js';
 import { store, StoreController } from '../store.js';
-import { isActiveJob } from './download-row.js';
 import './download-row.js';
 import type { DdsDownloadSheet } from './download-sheet.js';
 import './download-sheet.js';
 import './icon.js';
 import { sharedStyles } from './styles.js';
 
+const isFinished = (job: JobView) => job.status === 'completed' || job.status === 'cancelled';
 const finishedAt = (job: JobView) => job.finishedAt ?? job.updatedAt;
 
 /** Home screen: setup checklist, running and finished downloads. */
@@ -43,11 +43,17 @@ export class DdsDownloadsPage extends LitElement {
   }
 
   private async clear(): Promise<void> {
+    const ids = store.jobs.filter(isFinished).map((job) => job.id);
     this.clearing = true;
     try {
-      await api.clearJobs();
-      // The server clears every job that is not running, failed ones included.
-      store.removeJobs(store.jobs.filter((job) => !isActiveJob(job)).map((job) => job.id));
+      // The server's clear also drops failed jobs, which are listed with the running ones to
+      // be retried: remove the finished ones one by one when there are some.
+      if (store.jobs.some((job) => job.status === 'error')) {
+        await Promise.all(ids.map((id) => api.deleteJob(id, false)));
+      } else {
+        await api.clearJobs();
+      }
+      store.removeJobs(ids);
     } catch (error) {
       store.toast(errorMessage(error instanceof ApiError ? error.info.code : 'internal'), 'error');
     } finally {
@@ -66,31 +72,26 @@ export class DdsDownloadsPage extends LitElement {
     const configured = hasProvider && hasDestination;
 
     const jobs = store.jobs;
-    const active = jobs
-      .filter((job) => isActiveJob(job) || job.status === 'error')
-      .sort((a, b) => b.createdAt - a.createdAt);
-    const finished = jobs
-      .filter((job) => job.status === 'completed' || job.status === 'cancelled')
-      .sort((a, b) => finishedAt(b) - finishedAt(a));
+    // Failed jobs stay with the running ones, where they can be retried.
+    const active = jobs.filter((job) => !isFinished(job)).sort((a, b) => b.createdAt - a.createdAt);
+    const finished = jobs.filter(isFinished).sort((a, b) => finishedAt(b) - finishedAt(a));
 
     return html`
       ${configured ? nothing : this.renderSetup(hasProvider, hasDestination)}
-      ${jobs.length
-        ? html`
-            ${this.renderSection(t('downloads.active'), active)}
-            ${this.renderSection(
-              t('downloads.finished'),
-              finished,
-              html`<button
-                class="btn btn-plain"
-                ?disabled=${this.clearing}
-                @click=${this.clear}
-              >
-                ${t('downloads.clear')}
-              </button>`,
-            )}
-          `
-        : this.renderEmpty(configured)}
+      ${
+        jobs.length
+          ? html`
+              ${this.renderSection(t('downloads.active'), active)}
+              ${this.renderSection(
+                t('downloads.finished'),
+                finished,
+                html`<button class="btn btn-plain" ?disabled=${this.clearing} @click=${this.clear}>
+                  ${t('downloads.clear')}
+                </button>`,
+              )}
+            `
+          : this.renderEmpty(configured)
+      }
       <dds-download-sheet></dds-download-sheet>
     `;
   }
@@ -149,11 +150,13 @@ export class DdsDownloadsPage extends LitElement {
         <dds-icon class="empty-icon" .path=${mdiTrayArrowDown}></dds-icon>
         <h2 class="empty-title">${t('downloads.empty')}</h2>
         <p class="empty-text">${t('downloads.emptyHint')}</p>
-        ${configured
-          ? html`<button class="btn btn-primary" @click=${this.openAdd}>
-              ${t('downloads.add')}
-            </button>`
-          : nothing}
+        ${
+          configured
+            ? html`<button class="btn btn-primary" @click=${this.openAdd}>
+                ${t('downloads.add')}
+              </button>`
+            : nothing
+        }
       </div>
     `;
   }
@@ -225,10 +228,6 @@ export class DdsDownloadsPage extends LitElement {
       .empty.compact {
         min-height: 0;
         padding-top: 48px;
-      }
-
-      .section + .empty {
-        margin-top: 0;
       }
 
       @keyframes appear {

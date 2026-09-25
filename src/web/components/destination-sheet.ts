@@ -11,7 +11,7 @@ import { api, ApiError } from '../api.js';
 import { errorMessage, iconLabel, t } from '../i18n.js';
 import { categoryIcon } from '../icons.js';
 import { store, StoreController } from '../store.js';
-import { normalizePath, type DdsFolderPicker } from './folder-picker.js';
+import { inlineInputStyles, normalizePath, type DdsFolderPicker } from './folder-picker.js';
 import './icon.js';
 import type { DdsSheet } from './sheet.js';
 import './sheet.js';
@@ -151,10 +151,11 @@ export class DdsDestinationSheet extends LitElement {
               />
             </div>
             <div class="row field-row">
-              <label class="field-label" for="folder">${t('destination.folder')}</label>
+              <label class="field-label" for="folder">${t('destination.folderShort')}</label>
               <input
                 id="folder"
                 class="inline-input mono-input"
+                aria-label=${t('destination.folder')}
                 .value=${live(this.folder)}
                 placeholder=${t('destination.folderPlaceholder')}
                 autocomplete="off"
@@ -192,7 +193,9 @@ export class DdsDestinationSheet extends LitElement {
         <section class="section">
           <div class="group">
             <label class="row ${forcedDefault ? 'locked' : ''}">
-              <span class="row-main"><span class="row-title">${t('destination.default')}</span></span>
+              <span class="row-main"
+                ><span class="row-title">${t('destination.default')}</span></span
+              >
               <input
                 type="checkbox"
                 class="switch"
@@ -206,19 +209,21 @@ export class DdsDestinationSheet extends LitElement {
           </div>
         </section>
 
-        ${this.editing
-          ? html`<section class="section">
-              <div class="group">
-                <button
-                  class="row destructive"
-                  ?disabled=${this.saving || this.deleting}
-                  @click=${this.deleteDestination}
-                >
-                  ${t('destination.delete')}
-                </button>
-              </div>
-            </section>`
-          : nothing}
+        ${
+          this.editing
+            ? html`<section class="section">
+                <div class="group">
+                  <button
+                    class="row destructive"
+                    ?disabled=${this.saving || this.deleting}
+                    @click=${this.deleteDestination}
+                  >
+                    ${t('destination.delete')}
+                  </button>
+                </div>
+              </section>`
+            : nothing
+        }
       </dds-sheet>
       <dds-folder-picker
         @dds-pick=${(event: CustomEvent<string>) => (this.folder = event.detail)}
@@ -228,6 +233,7 @@ export class DdsDestinationSheet extends LitElement {
 
   static override styles = [
     sharedStyles,
+    inlineInputStyles,
     css`
       .row:focus-visible {
         box-shadow: inset var(--focus-ring);
@@ -240,7 +246,7 @@ export class DdsDestinationSheet extends LitElement {
 
       .field-label {
         flex: none;
-        width: 110px;
+        width: 100px;
         color: var(--text-secondary);
         cursor: default;
       }
@@ -250,53 +256,21 @@ export class DdsDestinationSheet extends LitElement {
         margin-right: -8px;
       }
 
-      .inline-input {
-        flex: 1;
-        min-width: 0;
-        min-height: 32px;
-        padding: 0;
-        border: none;
-        border-radius: 0;
-        font: inherit;
-        /* 16px keeps iOS Safari from zooming in on focus. */
-        font-size: 16px;
-        color: var(--text);
-        background: transparent;
-        outline: none;
-      }
-
-      .inline-input:focus-visible {
-        box-shadow: none;
-      }
-
-      .inline-input::placeholder {
-        font-family: var(--font);
-        color: var(--text-tertiary);
-      }
-
-      .mono-input {
-        font-family: var(--font-mono);
-      }
-
-      @media (pointer: fine) {
-        .inline-input {
-          font-size: 15px;
-        }
-      }
-
+      /* Two rows of 7: squares of 44px at most, a bit less on narrow phones. */
       .icons {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+        grid-template-columns: repeat(7, minmax(0, 1fr));
         justify-items: center;
-        gap: 12px 8px;
+        gap: 8px;
         padding: 12px;
       }
 
       .icon-choice {
         display: grid;
         place-items: center;
-        width: 44px;
-        height: 44px;
+        width: 100%;
+        max-width: 44px;
+        aspect-ratio: 1;
         padding: 0;
         border: none;
         border-radius: 10px;

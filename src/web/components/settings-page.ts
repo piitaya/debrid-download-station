@@ -29,7 +29,9 @@ import {
 import { sharedStyles } from './styles.js';
 
 /** Settings changed in place (switches, order). */
-type InlinePatch = Partial<Pick<AppSettings, 'categories' | 'createSubfolder' | 'deleteFromDebrid'>>;
+type InlinePatch = Partial<
+  Pick<AppSettings, 'categories' | 'createSubfolder' | 'deleteFromDebrid'>
+>;
 
 /** "AllDebrid" → "AD". */
 const initials = (name: string) => (name.match(/[A-Z]/g) ?? [name]).join('').slice(0, 2);
@@ -132,7 +134,10 @@ export class DdsSettingsPage extends LitElement {
 
   private registerMagnetHandler(): void {
     try {
-      navigator.registerProtocolHandler('magnet', `${location.origin}${location.pathname}?magnet=%s`);
+      navigator.registerProtocolHandler(
+        'magnet',
+        `${location.origin}${location.pathname}?magnet=%s`,
+      );
       store.toast(t('settings.magnetHandlerDone'), 'info');
     } catch {
       store.toast(errorMessage('internal'), 'error');
@@ -145,18 +150,22 @@ export class DdsSettingsPage extends LitElement {
     const admin = session.user.isAdmin;
 
     return html`
-      ${admin
-        ? html`${this.renderServices(settings)} ${this.renderDestinations(settings)}
-          ${this.renderDownloading(settings)}`
-        : html`<p class="note">${t('settings.adminOnly')}</p>`}
+      ${
+        admin
+          ? html`${this.renderServices(settings)} ${this.renderDestinations(settings)}
+            ${this.renderDownloading(settings)}`
+          : html`<p class="note">${t('settings.adminOnly')}</p>`
+      }
       ${this.renderAccount(session)}
       <p class="about">${t('app.name')} · ${t('settings.version', { version: session.version })}</p>
-      ${admin
-        ? html`<dds-provider-sheet
-              @dds-provider-checked=${this.onProviderChecked}
-            ></dds-provider-sheet>
-            <dds-destination-sheet></dds-destination-sheet>`
-        : nothing}
+      ${
+        admin
+          ? html`<dds-provider-sheet
+                @dds-provider-checked=${this.onProviderChecked}
+              ></dds-provider-sheet>
+              <dds-destination-sheet></dds-destination-sheet>`
+          : nothing
+      }
     `;
   }
 
@@ -179,12 +188,13 @@ export class DdsSettingsPage extends LitElement {
     const name = PROVIDERS[id].name;
     const check = configured ? this.checks[id] : undefined;
 
-    const details: string[] = [];
-    if (check?.status === 'ok') details.push(check.account.username, premiumLabel(check.account));
-    if (check?.status === 'error') {
-      details.push(errorMessage(check.error.code).replace(/\.$/, ''));
+    // « demo-alldebrid · Par défaut » then « Premium jusqu’au … »: short lines that do not wrap.
+    const lines: string[] = [];
+    if (check?.status === 'ok') lines.push(check.account.username, premiumLabel(check.account));
+    if (check?.status === 'error') lines.push(errorMessage(check.error.code).replace(/\.$/, ''));
+    if (isDefault) {
+      lines[0] = lines[0] ? `${lines[0]} · ${t('settings.default')}` : t('settings.default');
     }
-    if (isDefault) details.push(t('settings.default'));
 
     const [value, tone] = !configured
       ? [t('provider.notConfigured'), 'off']
@@ -197,10 +207,18 @@ export class DdsSettingsPage extends LitElement {
     return html`<button class="row" @click=${() => this.providerSheet.open(id, this.checks[id])}>
       <span class="row-icon initials" aria-hidden="true">${initials(name)}</span>
       <span class="row-main">
-        <span class="row-title">${name}</span>
-        ${details.length ? html`<span class="row-subtitle">${details.join(' · ')}</span>` : nothing}
+        <span class="title-line">
+          <span class="row-title">${name}</span>
+          <span class="row-value ${tone}">${value}</span>
+        </span>
+        ${
+          lines.length
+            ? html`<span class="row-subtitle details">
+                ${lines.map((line) => html`<span>${line}</span>`)}
+              </span>`
+            : nothing
+        }
       </span>
-      <span class="row-value ${tone}">${value}</span>
       <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
     </button>`;
   }
@@ -211,11 +229,13 @@ export class DdsSettingsPage extends LitElement {
     return html`<section class="section">
       <div class="section-header">
         <h2>${t('settings.destinations')}</h2>
-        ${categories.length > 1
-          ? html`<button class="btn btn-plain" @click=${() => (this.reordering = !reordering)}>
-              ${reordering ? t('settings.done') : t('settings.edit')}
-            </button>`
-          : nothing}
+        ${
+          categories.length > 1
+            ? html`<button class="btn btn-plain" @click=${() => (this.reordering = !reordering)}>
+                ${reordering ? t('settings.done') : t('settings.edit')}
+              </button>`
+            : nothing
+        }
       </div>
       <div class="group with-icons">
         ${repeat(
@@ -230,14 +250,16 @@ export class DdsSettingsPage extends LitElement {
               reordering,
             ),
         )}
-        ${reordering
-          ? nothing
-          : html`<button class="row add" @click=${() => this.destinationSheet.open(null)}>
-              <span class="row-icon accent"><dds-icon .path=${mdiPlus}></dds-icon></span>
-              <span class="row-main">
-                <span class="row-title">${t('settings.addDestination')}</span>
-              </span>
-            </button>`}
+        ${
+          reordering
+            ? nothing
+            : html`<button class="row accent" @click=${() => this.destinationSheet.open(null)}>
+                <span class="row-icon accent"><dds-icon .path=${mdiPlus}></dds-icon></span>
+                <span class="row-main">
+                  <span class="row-title">${t('settings.addDestination')}</span>
+                </span>
+              </button>`
+        }
       </div>
       <p class="section-footer">${t('settings.destinationsFooter')}</p>
     </section>`;
@@ -253,10 +275,12 @@ export class DdsSettingsPage extends LitElement {
     const content = html`
       <span class="row-icon"><dds-icon .path=${categoryIcon(category.icon)}></dds-icon></span>
       <span class="row-main">
-        <span class="row-title wrap">${category.name}</span>
+        <span class="title-line">
+          <span class="row-title wrap">${category.name}</span>
+          ${isDefault ? html`<span class="row-value">${t('settings.default')}</span>` : nothing}
+        </span>
         <span class="row-subtitle">${breakable(category.destination)}</span>
       </span>
-      ${isDefault ? html`<span class="row-value">${t('settings.default')}</span>` : nothing}
     `;
     if (!reordering) {
       return html`<button
@@ -330,26 +354,32 @@ export class DdsSettingsPage extends LitElement {
     const canHandleMagnets =
       window.isSecureContext && typeof navigator.registerProtocolHandler === 'function';
     return html`<section class="section">
-      <h2 class="section-header">${t('settings.account')}</h2>
-      <div class="group">
-        <div class="row">
-          <span class="row-main">
-            <span class="row-title wrap">
-              ${t('settings.signedInAs', { user: session.user.username })}
+        <h2 class="section-header">${t('settings.account')}</h2>
+        <div class="group">
+          <div class="row">
+            <span class="row-main">
+              <span class="row-title wrap">
+                ${t('settings.signedInAs', { user: session.user.username })}
+              </span>
+              <span class="row-subtitle mono wrap">${session.nasUrl}</span>
             </span>
-            <span class="row-subtitle mono wrap">${session.nasUrl}</span>
-          </span>
+          </div>
+          ${
+            canHandleMagnets
+              ? html`<button class="row accent" @click=${this.registerMagnetHandler}>
+                  ${t('settings.magnetHandler')}
+                </button>`
+              : nothing
+          }
         </div>
-        ${canHandleMagnets
-          ? html`<button class="row action" @click=${this.registerMagnetHandler}>
-              ${t('settings.magnetHandler')}
-            </button>`
-          : nothing}
-        <button class="row destructive" @click=${() => store.logout()}>
-          ${t('settings.signOut')}
-        </button>
-      </div>
-    </section>`;
+      </section>
+      <section class="section">
+        <div class="group">
+          <button class="row destructive" @click=${() => store.logout()}>
+            ${t('settings.signOut')}
+          </button>
+        </div>
+      </section>`;
   }
 
   static override styles = [
@@ -376,6 +406,33 @@ export class DdsSettingsPage extends LitElement {
         letter-spacing: -0.2px;
       }
 
+      /* The value sits on the title line, so that subtitles get the full width. */
+      .title-line {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+
+      .title-line .row-title {
+        flex: 1;
+        min-width: 0;
+      }
+
+      /* One line per detail on phones, a single line on larger screens. */
+      .details > span {
+        display: block;
+      }
+
+      @media (min-width: 640px) {
+        .details > span {
+          display: inline;
+        }
+
+        .details > span + span::before {
+          content: ' · ';
+        }
+      }
+
       .row-value.ok {
         color: var(--success);
       }
@@ -388,7 +445,7 @@ export class DdsSettingsPage extends LitElement {
         color: var(--text-tertiary);
       }
 
-      .add {
+      .row.accent {
         color: var(--accent);
       }
 

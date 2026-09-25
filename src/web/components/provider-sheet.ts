@@ -19,6 +19,7 @@ import {
   mdiOpenInNew,
 } from '../icons.js';
 import { store, StoreController } from '../store.js';
+import { inlineInputStyles } from './folder-picker.js';
 import './icon.js';
 import type { DdsSheet } from './sheet.js';
 import './sheet.js';
@@ -197,53 +198,63 @@ export class DdsProviderSheet extends LitElement {
         @dds-primary=${this.save}
         @dds-closed=${this.onClosed}
       >
-        ${this.check || fromEnv
-          ? html`<section class="section">
-              <h3 class="section-header">${t('provider.account')}</h3>
-              ${this.check ? html`<div class="group">${this.renderCheck(this.check)}</div>` : nothing}
-              ${fromEnv ? html`<p class="section-footer">${this.renderFromEnv()}</p>` : nothing}
-            </section>`
-          : nothing}
+        ${
+          this.check || fromEnv
+            ? html`<section class="section">
+                <h3 class="section-header">${t('provider.account')}</h3>
+                ${this.check ? html`<div class="group">${this.renderCheck(this.check)}</div>` : nothing}
+                ${fromEnv ? html`<p class="section-footer">${this.renderFromEnv()}</p>` : nothing}
+              </section>`
+            : nothing
+        }
         ${fromEnv ? nothing : this.renderKey(configured)}
-        ${configured && configuredCount >= 2
-          ? html`<section class="section">
-              <div class="group">
-                <label class="row ${isDefault ? 'locked' : ''}">
-                  <span class="row-main"><span class="row-title">${t('provider.default')}</span></span>
-                  <input
-                    type="checkbox"
-                    class="switch"
-                    role="switch"
-                    .checked=${live(isDefault)}
-                    ?disabled=${isDefault || this.working}
-                    @change=${this.makeDefault}
-                  />
-                </label>
-              </div>
-            </section>`
-          : nothing}
-        ${configured && !fromEnv
-          ? html`<section class="section">
-              <div class="group">
-                <button
-                  class="row destructive"
-                  ?disabled=${this.working || this.saving}
-                  @click=${this.removeKey}
-                >
-                  ${t('provider.remove')}
-                </button>
-              </div>
-            </section>`
-          : nothing}
+        ${
+          configured && configuredCount >= 2
+            ? html`<section class="section">
+                <div class="group">
+                  <label class="row ${isDefault ? 'locked' : ''}">
+                    <span class="row-main"
+                      ><span class="row-title">${t('provider.default')}</span></span
+                    >
+                    <input
+                      type="checkbox"
+                      class="switch"
+                      role="switch"
+                      .checked=${live(isDefault)}
+                      ?disabled=${isDefault || this.working}
+                      @change=${this.makeDefault}
+                    />
+                  </label>
+                </div>
+              </section>`
+            : nothing
+        }
+        ${
+          configured && !fromEnv
+            ? html`<section class="section">
+                <div class="group">
+                  <button
+                    class="row destructive"
+                    ?disabled=${this.working || this.saving}
+                    @click=${this.removeKey}
+                  >
+                    ${t('provider.remove')}
+                  </button>
+                </div>
+              </section>`
+            : nothing
+        }
       </dds-sheet>
     `;
   }
 
   private renderCheck(check: ProviderCheck) {
     if (check.status === 'checking') {
-      return html`<div class="row status" role="status">
+      return html`<div class="row status checking" role="status">
         <span class="status-icon"><span class="spinner"></span></span>
-        <span class="row-main"><span class="row-title secondary">${t('provider.checking')}</span></span>
+        <span class="row-main"
+          ><span class="row-title secondary">${t('provider.checking')}</span></span
+        >
       </div>`;
     }
     if (check.status === 'ok') {
@@ -260,9 +271,11 @@ export class DdsProviderSheet extends LitElement {
       <dds-icon class="status-icon danger-text" .path=${mdiAlertCircleOutline}></dds-icon>
       <span class="row-main">
         <span class="row-title danger-text">${errorMessage(check.error.code)}</span>
-        ${raw && raw !== check.error.code
-          ? html`<span class="row-subtitle wrap">${raw}</span>`
-          : nothing}
+        ${
+          raw && raw !== check.error.code
+            ? html`<span class="row-subtitle wrap">${raw}</span>`
+            : nothing
+        }
       </span>
     </div>`;
   }
@@ -321,6 +334,7 @@ export class DdsProviderSheet extends LitElement {
 
   static override styles = [
     sharedStyles,
+    inlineInputStyles,
     css`
       .row:focus-visible {
         box-shadow: inset var(--focus-ring);
@@ -338,11 +352,22 @@ export class DdsProviderSheet extends LitElement {
         width: 22px;
         height: 22px;
         margin-top: -1px;
+      }
+
+      .status-icon .spinner {
         color: var(--text-secondary);
       }
 
       .status .row-main {
         align-self: center;
+      }
+
+      .status.checking {
+        align-items: center;
+      }
+
+      .status.checking .status-icon {
+        margin-top: 0;
       }
 
       .status .row-subtitle {
@@ -353,40 +378,6 @@ export class DdsProviderSheet extends LitElement {
         padding-top: 4px;
         padding-bottom: 4px;
         padding-right: 6px;
-      }
-
-      .inline-input {
-        flex: 1;
-        min-width: 0;
-        min-height: 32px;
-        padding: 0;
-        border: none;
-        border-radius: 0;
-        font: inherit;
-        /* 16px keeps iOS Safari from zooming in on focus. */
-        font-size: 16px;
-        color: var(--text);
-        background: transparent;
-        outline: none;
-      }
-
-      .inline-input:focus-visible {
-        box-shadow: none;
-      }
-
-      .inline-input::placeholder {
-        font-family: var(--font);
-        color: var(--text-tertiary);
-      }
-
-      .mono-input {
-        font-family: var(--font-mono);
-      }
-
-      @media (pointer: fine) {
-        .inline-input {
-          font-size: 15px;
-        }
       }
 
       .actions {

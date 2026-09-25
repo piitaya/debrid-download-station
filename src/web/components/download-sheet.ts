@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import { keyed } from 'lit/directives/keyed.js';
 import { PROVIDERS, type JobFileView, type JobView } from '../../shared/types.js';
 import { api, ApiError } from '../api.js';
 import { breakable, formatBytes, formatPercent } from '../format.js';
@@ -88,11 +89,13 @@ export class DdsDownloadSheet extends LitElement {
 
   override render() {
     const job = this.job;
-    return html`
-      <dds-sheet heading=${t('downloads.details')} @dds-closed=${() => (this.jobId = null)}>
+    // A new panel for each download: it opens scrolled to the top.
+    return keyed(
+      this.jobId,
+      html`<dds-sheet heading=${t('downloads.details')} @dds-closed=${() => (this.jobId = null)}>
         ${job ? this.renderJob(job) : nothing}
-      </dds-sheet>
-    `;
+      </dds-sheet>`,
+    );
   }
 
   private renderJob(job: JobView) {
@@ -107,15 +110,17 @@ export class DdsDownloadSheet extends LitElement {
           </div>
           ${renderProgress(job)}
         </div>
-        ${job.error
-          ? html`<div class="notice">
-              <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
-              <div class="notice-text">
-                <p>${errorMessage(job.error.code)}</p>
-                ${job.error.message ? html`<p class="raw">${job.error.message}</p>` : nothing}
-              </div>
-            </div>`
-          : nothing}
+        ${
+          job.error
+            ? html`<div class="notice">
+                <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
+                <div class="notice-text">
+                  <p>${errorMessage(job.error.code)}</p>
+                  ${job.error.message ? html`<p class="raw">${job.error.message}</p>` : nothing}
+                </div>
+              </div>`
+            : nothing
+        }
       </div>
 
       <section class="section">
@@ -137,26 +142,34 @@ export class DdsDownloadSheet extends LitElement {
 
       <section class="section">
         <div class="group">
-          ${job.status === 'error'
-            ? html`<button class="row action" ?disabled=${this.busy} @click=${() => this.retry(job)}>
-                ${t('downloads.retry')}
-              </button>`
-            : nothing}
-          ${isActiveJob(job)
-            ? html`<button
-                class="row destructive"
-                ?disabled=${this.busy}
-                @click=${() => this.deleteJob(job, true)}
-              >
-                ${t('downloads.cancel')}
-              </button>`
-            : html`<button
-                class="row destructive"
-                ?disabled=${this.busy}
-                @click=${() => this.deleteJob(job, false)}
-              >
-                ${t('downloads.remove')}
-              </button>`}
+          ${
+            job.status === 'error'
+              ? html`<button
+                  class="row action"
+                  ?disabled=${this.busy}
+                  @click=${() => this.retry(job)}
+                >
+                  ${t('downloads.retry')}
+                </button>`
+              : nothing
+          }
+          ${
+            isActiveJob(job)
+              ? html`<button
+                  class="row destructive"
+                  ?disabled=${this.busy}
+                  @click=${() => this.deleteJob(job, true)}
+                >
+                  ${t('downloads.cancel')}
+                </button>`
+              : html`<button
+                  class="row destructive"
+                  ?disabled=${this.busy}
+                  @click=${() => this.deleteJob(job, false)}
+                >
+                  ${t('downloads.remove')}
+                </button>`
+          }
         </div>
       </section>
     `;
@@ -179,17 +192,20 @@ export class DdsDownloadSheet extends LitElement {
         </h3>
         <div class="group">
           ${shown.map(
-            (file) => html`<div class="row file">
-              <div class="row-main">
-                <span class="row-title">${breakable(file.path)}</span>
-                <span class="row-subtitle num">${formatBytes(file.size)}</span>
-              </div>
-              ${this.renderFileStatus(file)}
-            </div>`,
+            (file) =>
+              html`<div class="row file">
+                <div class="row-main">
+                  <span class="row-title">${breakable(file.path)}</span>
+                  <span class="row-subtitle num">${formatBytes(file.size)}</span>
+                </div>
+                ${this.renderFileStatus(file)}
+              </div>`,
           )}
-          ${more > 0
-            ? html`<div class="row more">${t('downloads.moreFiles', { count: more })}</div>`
-            : nothing}
+          ${
+            more > 0
+              ? html`<div class="row more">${t('downloads.moreFiles', { count: more })}</div>`
+              : nothing
+          }
         </div>
       </section>
     `;

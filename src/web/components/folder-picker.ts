@@ -25,6 +25,42 @@ export function normalizePath(value: string): string {
   return parts.some((part) => part === '.' || part === '..') ? '' : parts.join('/');
 }
 
+/** Borderless input filling a row (the row is the field). Shared by the settings sheets. */
+export const inlineInputStyles = css`
+  .inline-input {
+    flex: 1;
+    min-width: 0;
+    min-height: 32px;
+    padding: 0;
+    border: none;
+    font: inherit;
+    /* 16px keeps iOS Safari from zooming in on focus. */
+    font-size: 16px;
+    color: var(--text);
+    background: transparent;
+    outline: none;
+  }
+
+  .inline-input:focus-visible {
+    box-shadow: none;
+  }
+
+  .inline-input::placeholder {
+    font-family: var(--font);
+    color: var(--text-tertiary);
+  }
+
+  .inline-input.mono-input {
+    font-family: var(--font-mono);
+  }
+
+  @media (pointer: fine) {
+    .inline-input {
+      font-size: 15px;
+    }
+  }
+`;
+
 const errorCode = (error: unknown): ErrorCode =>
   error instanceof ApiError ? error.info.code : 'internal';
 
@@ -83,6 +119,15 @@ export class DdsFolderPicker extends LitElement {
     }
   }
 
+  /** Opens a folder from the list or the breadcrumb, keeping the keyboard focus in the list. */
+  private async navigate(path: string | null): Promise<void> {
+    const hadFocus = !!this.shadowRoot?.activeElement;
+    await this.load(path);
+    if (!hadFocus) return;
+    await this.updateComplete;
+    this.renderRoot.querySelector<HTMLElement>('.group button')?.focus();
+  }
+
   private async startCreating(): Promise<void> {
     this.creating = true;
     await this.updateComplete;
@@ -94,6 +139,12 @@ export class DdsFolderPicker extends LitElement {
     this.newName = '';
   }
 
+  private async cancelCreating(): Promise<void> {
+    this.stopCreating();
+    await this.updateComplete;
+    this.renderRoot.querySelector<HTMLElement>('.row.accent')?.focus();
+  }
+
   private async create(): Promise<void> {
     const name = this.newName.trim();
     if (!name || this.path === null || this.busy) return;
@@ -101,7 +152,7 @@ export class DdsFolderPicker extends LitElement {
     try {
       const folder = await api.createFolder(this.path, name);
       this.busy = false;
-      await this.load(folder.path);
+      await this.navigate(folder.path);
     } catch (error) {
       store.toast(errorMessage(errorCode(error)), 'error');
     } finally {
@@ -118,7 +169,7 @@ export class DdsFolderPicker extends LitElement {
       // Leaves the dialog open.
       event.preventDefault();
       event.stopPropagation();
-      this.stopCreating();
+      void this.cancelCreating();
     }
   }
 
@@ -141,12 +192,14 @@ export class DdsFolderPicker extends LitElement {
         @dds-primary=${this.choose}
       >
         ${this.renderBreadcrumb()}
-        ${this.error
-          ? html`<div class="notice" role="alert">
-              <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
-              <span>${t('picker.error')} ${errorMessage(this.error)}</span>
-            </div>`
-          : this.renderList()}
+        ${
+          this.error
+            ? html`<div class="notice" role="alert">
+                <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
+                <span>${t('picker.error')} ${errorMessage(this.error)}</span>
+              </div>`
+            : this.renderList()
+        }
       </dds-sheet>
     `;
   }
@@ -159,37 +212,49 @@ export class DdsFolderPicker extends LitElement {
     ];
     return html`<nav class="crumbs" aria-label=${t('picker.location')}>
       ${crumbs.map((crumb, index) => {
-        const current = index === crumbs.length - 1;
-        return html`${index ? html`<dds-icon class="separator" .path=${mdiChevronRight}></dds-icon>` : nothing}${current
-            ? html`<span class="crumb current" aria-current="location">${crumb.label}</span>`
-            : html`<button class="btn btn-plain btn-sm crumb" @click=${() => this.load(crumb.path)}>
-                <span>${crumb.label}</span>
-              </button>`}`;
+        const separator = index
+          ? html`<dds-icon class="separator" .path=${mdiChevronRight}></dds-icon>`
+          : nothing;
+        if (index === crumbs.length - 1) {
+          return html`${separator}<span class="crumb current" aria-current="location"
+              >${crumb.label}</span
+            >`;
+        }
+        return html`${separator}<button
+            class="btn btn-plain btn-sm crumb"
+            @click=${() => this.navigate(crumb.path)}
+          >
+            <span>${crumb.label}</span>
+          </button>`;
       })}
     </nav>`;
   }
 
   private renderList() {
     return html`<div class="group with-icons" aria-busy=${this.loading ? 'true' : 'false'}>
-      ${this.loading
-        ? html`<div class="row message"><span class="spinner"></span></div>`
-        : this.folders.length
-          ? this.folders.map(
-              (folder) =>
-                html`<button class="row" @click=${() => this.load(folder.path)}>
-                  <span class="row-icon"><dds-icon .path=${mdiFolderOutline}></dds-icon></span>
-                  <span class="row-main"><span class="row-title">${breakable(folder.name)}</span></span>
-                  <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
-                </button>`,
-            )
-          : html`<div class="row message">${t('picker.empty')}</div>`}
+      ${
+        this.loading
+          ? html`<div class="row message loading"><span class="spinner"></span></div>`
+          : this.folders.length
+            ? this.folders.map(
+                (folder) =>
+                  html`<button class="row" @click=${() => this.navigate(folder.path)}>
+                    <span class="row-icon"><dds-icon .path=${mdiFolderOutline}></dds-icon></span>
+                    <span class="row-main"
+                      ><span class="row-title">${breakable(folder.name)}</span></span
+                    >
+                    <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
+                  </button>`,
+              )
+            : html`<div class="row message empty">${t('picker.empty')}</div>`
+      }
       ${this.path !== null && !this.loading ? this.renderNewFolder() : nothing}
     </div>`;
   }
 
   private renderNewFolder() {
     if (!this.creating) {
-      return html`<button class="row add" @click=${this.startCreating}>
+      return html`<button class="row accent" @click=${this.startCreating}>
         <span class="row-icon accent"><dds-icon .path=${mdiPlus}></dds-icon></span>
         <span class="row-main"><span class="row-title">${t('picker.newFolder')}</span></span>
       </button>`;
@@ -219,6 +284,7 @@ export class DdsFolderPicker extends LitElement {
 
   static override styles = [
     sharedStyles,
+    inlineInputStyles,
     css`
       .row:focus-visible {
         box-shadow: inset var(--focus-ring);
@@ -228,25 +294,26 @@ export class DdsFolderPicker extends LitElement {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 2px;
         min-height: 30px;
         margin: 0 0 8px;
-        padding: 0 6px;
+        padding: 0 10px;
       }
 
       .crumb {
         max-width: 100%;
+        padding: 0 6px;
       }
 
       .crumb span {
         min-width: 0;
         overflow: hidden;
+        line-height: 18px;
         text-overflow: ellipsis;
       }
 
       .crumb.current {
-        padding: 0 10px;
         overflow: hidden;
+        line-height: 18px;
         font-size: 13px;
         font-weight: 600;
         text-overflow: ellipsis;
@@ -263,15 +330,23 @@ export class DdsFolderPicker extends LitElement {
       }
 
       .message {
-        justify-content: center;
         color: var(--text-secondary);
+      }
+
+      /* Aligned with the folder names. */
+      .message.empty {
+        padding-left: 56px;
+      }
+
+      .message.loading {
+        justify-content: center;
       }
 
       .message .spinner {
         color: var(--text-tertiary);
       }
 
-      .add {
+      .row.accent {
         color: var(--accent);
       }
 
@@ -282,35 +357,6 @@ export class DdsFolderPicker extends LitElement {
       .new-folder .spinner {
         width: 14px;
         height: 14px;
-      }
-
-      .inline-input {
-        flex: 1;
-        min-width: 0;
-        min-height: 32px;
-        padding: 0;
-        border: none;
-        border-radius: 0;
-        font: inherit;
-        /* 16px keeps iOS Safari from zooming in on focus. */
-        font-size: 16px;
-        color: var(--text);
-        background: transparent;
-        outline: none;
-      }
-
-      .inline-input:focus-visible {
-        box-shadow: none;
-      }
-
-      .inline-input::placeholder {
-        color: var(--text-tertiary);
-      }
-
-      @media (pointer: fine) {
-        .inline-input {
-          font-size: 15px;
-        }
       }
     `,
   ];
