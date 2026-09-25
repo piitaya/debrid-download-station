@@ -40,12 +40,12 @@
 - **Liens magnet** (un ou plusieurs à la fois), hash, ou **fichiers `.torrent`** : glisser-déposer
   sur ordinateur, app Fichiers sur iPhone.
 - **Le bon dossier.** Des destinations (Films → `video/Films`, Séries → `video/Séries`…) se créent
-  en parcourant les dossiers du NAS ; il suffit d'en choisir une à chaque ajout. Le dernier choix
-  est mémorisé.
+  en parcourant les dossiers du NAS, un nouveau dossier pouvant être créé au passage ; il suffit
+  d'en choisir une à chaque ajout. Le dernier choix est mémorisé.
 - **Comme un client BitTorrent.** Un torrent à plusieurs fichiers arrive dans son propre dossier,
   avec ses sous-dossiers.
 - **Suivi en direct.** Progression chez le service debrid puis dans Download Station, fichier par
-  fichier, avec possibilité de réessayer ou d'annuler.
+  fichier, avec possibilité de réessayer ou d'arrêter.
 - **Connexion avec un compte Synology.** La validation en deux étapes est gérée et l'appareil est
   mémorisé. Les tâches sont créées avec ce compte et apparaissent donc dans Download Station.
 - **Pensé pour l'iPhone.** L'app s'installe sur l'écran d'accueil, passe en mode sombre

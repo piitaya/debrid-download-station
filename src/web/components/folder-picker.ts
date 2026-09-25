@@ -6,7 +6,6 @@ import { api, ApiError } from '../api.js';
 import { breakable } from '../format.js';
 import { errorMessage, locale, t } from '../i18n.js';
 import { mdiAlertCircleOutline, mdiChevronRight, mdiFolderOutline, mdiPlus } from '../icons.js';
-import { store } from '../store.js';
 import './icon.js';
 import type { DdsSheet } from './sheet.js';
 import './sheet.js';
@@ -58,6 +57,11 @@ export const inlineInputStyles = css`
     .inline-input {
       font-size: 15px;
     }
+
+    /* Keyboard and mouse: the group shows where typing goes (touch screens show the keyboard). */
+    .group:has(.inline-input:focus) {
+      box-shadow: var(--focus-ring);
+    }
   }
 `;
 
@@ -82,6 +86,8 @@ export class DdsFolderPicker extends LitElement {
   @state() private creating = false;
   @state() private newName = '';
   @state() private busy = false;
+  /** The folder could not be created. */
+  @state() private createError = '';
 
   @query('dds-sheet') private sheet!: DdsSheet;
   @query('.new-folder input') private newInput?: HTMLInputElement;
@@ -105,6 +111,7 @@ export class DdsFolderPicker extends LitElement {
     this.loading = true;
     this.creating = false;
     this.newName = '';
+    this.createError = '';
     try {
       const listing = await api.folders(path ?? undefined);
       if (run !== this.loadRun) return;
@@ -137,6 +144,7 @@ export class DdsFolderPicker extends LitElement {
   private stopCreating(): void {
     this.creating = false;
     this.newName = '';
+    this.createError = '';
   }
 
   private async cancelCreating(): Promise<void> {
@@ -149,12 +157,13 @@ export class DdsFolderPicker extends LitElement {
     const name = this.newName.trim();
     if (!name || this.path === null || this.busy) return;
     this.busy = true;
+    this.createError = '';
     try {
       const folder = await api.createFolder(this.path, name);
       this.busy = false;
       await this.navigate(folder.path);
     } catch (error) {
-      store.toast(errorMessage(errorCode(error)), 'error');
+      this.createError = errorMessage(errorCode(error));
     } finally {
       this.busy = false;
     }
@@ -189,6 +198,8 @@ export class DdsFolderPicker extends LitElement {
         heading=${t('picker.title')}
         primaryLabel=${t('picker.choose')}
         ?primaryDisabled=${this.path === null || this.loading || !!this.error}
+        tall
+        .error=${this.createError}
         @dds-primary=${this.choose}
       >
         ${this.renderBreadcrumb()}
@@ -268,7 +279,10 @@ export class DdsFolderPicker extends LitElement {
         aria-label=${t('picker.newFolderName')}
         maxlength="255"
         autocomplete="off"
-        @input=${(event: Event) => (this.newName = (event.target as HTMLInputElement).value)}
+        @input=${(event: Event) => {
+          this.newName = (event.target as HTMLInputElement).value;
+          this.createError = '';
+        }}
         @keydown=${this.onNewKeyDown}
         @blur=${this.onNewBlur}
       />
@@ -318,6 +332,13 @@ export class DdsFolderPicker extends LitElement {
         font-weight: 600;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      /* Same size as the links next to it (larger buttons on touch screens). */
+      @media (pointer: coarse) {
+        .crumb.current {
+          font-size: 15px;
+        }
       }
 
       .separator {

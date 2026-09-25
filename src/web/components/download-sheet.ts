@@ -7,6 +7,7 @@ import { breakable, formatBytes, formatPercent } from '../format.js';
 import { errorMessage, locale, t } from '../i18n.js';
 import { mdiAlertCircleOutline, mdiCheckCircle } from '../icons.js';
 import { store, StoreController } from '../store.js';
+import { confirmAction } from './confirm.js';
 import {
   isActiveJob,
   progressPercent,
@@ -35,6 +36,8 @@ const formatDateTime = (timestamp: number) =>
 export class DdsDownloadSheet extends LitElement {
   @state() private jobId: string | null = null;
   @state() private busy = false;
+  /** Error of the last action (retry, stop, remove). */
+  @state() private error = '';
 
   @query('dds-sheet') private sheet!: DdsSheet;
 
@@ -46,6 +49,7 @@ export class DdsDownloadSheet extends LitElement {
   async open(jobId: string): Promise<void> {
     if (!store.jobs.some((job) => job.id === jobId)) return;
     this.jobId = jobId;
+    this.error = '';
     await this.updateComplete;
     await this.sheet.show();
   }
@@ -65,10 +69,11 @@ export class DdsDownloadSheet extends LitElement {
   private async run(action: () => Promise<void>): Promise<void> {
     if (this.busy) return;
     this.busy = true;
+    this.error = '';
     try {
       await action();
     } catch (error) {
-      store.toast(errorMessage(error instanceof ApiError ? error.info.code : 'internal'), 'error');
+      this.error = errorMessage(error instanceof ApiError ? error.info.code : 'internal');
     } finally {
       this.busy = false;
     }
@@ -79,7 +84,16 @@ export class DdsDownloadSheet extends LitElement {
   }
 
   private async deleteJob(job: JobView, cancel: boolean): Promise<void> {
-    if (cancel && !confirm(t('downloads.cancelConfirm'))) return;
+    if (
+      cancel &&
+      !(await confirmAction({
+        title: t('downloads.cancelTitle'),
+        message: t('downloads.cancelMessage'),
+        confirmLabel: t('downloads.cancel'),
+      }))
+    ) {
+      return;
+    }
     await this.run(async () => {
       await api.deleteJob(job.id, cancel);
       store.removeJobs([job.id]);
@@ -92,7 +106,11 @@ export class DdsDownloadSheet extends LitElement {
     // A new panel for each download: it opens scrolled to the top.
     return keyed(
       this.jobId,
-      html`<dds-sheet heading=${t('downloads.details')} @dds-closed=${() => (this.jobId = null)}>
+      html`<dds-sheet
+        heading=${t('downloads.details')}
+        .error=${this.error}
+        @dds-closed=${() => (this.jobId = null)}
+      >
         ${job ? this.renderJob(job) : nothing}
       </dds-sheet>`,
     );
@@ -116,7 +134,13 @@ export class DdsDownloadSheet extends LitElement {
                 <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
                 <div class="notice-text">
                   <p>${errorMessage(job.error.code)}</p>
-                  ${job.error.message ? html`<p class="raw">${job.error.message}</p>` : nothing}
+                  ${
+                    job.error.message
+                      ? html`<p class="raw">
+                          ${t('common.detail', { message: job.error.message })}
+                        </p>`
+                      : nothing
+                  }
                 </div>
               </div>`
             : nothing
@@ -138,7 +162,7 @@ export class DdsDownloadSheet extends LitElement {
         </div>
       </section>
 
-      ${job.files.length ? this.renderFiles(job.files) : nothing}
+      ${job.files.length > 1 ? this.renderFiles(job.files) : nothing}
 
       <section class="section">
         <div class="group">

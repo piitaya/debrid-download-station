@@ -45,7 +45,11 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     throw new ApiError(0, { code: 'internal', message: (error as Error).message });
   }
 
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204) {
+    // Reading the (empty) body lets the browser end the request cleanly.
+    await response.arrayBuffer().catch(() => undefined);
+    return undefined as T;
+  }
   const data = (await response.json().catch(() => null)) as { error?: ErrorInfo } | null;
   if (!response.ok) {
     const info = data?.error ?? { code: 'internal', message: `HTTP ${response.status}` };

@@ -148,13 +148,18 @@ export function renderStatus(
   </span>`;
 }
 
+/**
+ * Progress bar. While the debrid service fetches the torrent the bar is grey: the blue one that
+ * follows, for the download to the NAS, starts again from zero.
+ */
 export function renderProgress(job: JobView): TemplateResult | typeof nothing {
   const progress = jobProgress(job);
   if (progress === null) return nothing;
+  const remote = job.status === 'debrid' ? 'remote' : '';
   if (progress === 'indeterminate') {
-    return html`<span class="progress indeterminate"><span></span></span>`;
+    return html`<span class="progress indeterminate ${remote}"><span></span></span>`;
   }
-  return html`<span class="progress">
+  return html`<span class="progress ${remote}">
     <span style=${styleMap({ width: `${Math.min(1, Math.max(0, progress)) * 100}%` })}></span>
   </span>`;
 }
@@ -218,9 +223,13 @@ export const statusStyles = css`
   .progress {
     display: block;
   }
+
+  .progress.remote > span {
+    background: var(--text-secondary);
+  }
 `;
 
-/** A download in the list: category tile, name, status line, progress, chevron. */
+/** A download in the list: category icon, name, status line, progress, chevron. */
 @customElement('dds-download-row')
 export class DdsDownloadRow extends LitElement {
   @property({ attribute: false }) job!: JobView;
@@ -229,7 +238,7 @@ export class DdsDownloadRow extends LitElement {
     const job = this.job;
     return html`
       <button class="row" aria-haspopup="dialog">
-        <span class="tile"><dds-icon .path=${categoryIcon(job.categoryIcon)}></dds-icon></span>
+        <span class="row-icon"><dds-icon .path=${categoryIcon(job.categoryIcon)}></dds-icon></span>
         <span class="main">
           <span class="name">${breakable(job.name)}</span>
           ${renderStatus(job)} ${renderProgress(job)}
@@ -254,32 +263,6 @@ export class DdsDownloadRow extends LitElement {
 
       .row:focus-visible {
         box-shadow: inset var(--focus-ring);
-      }
-
-      /* No sticky hover after a tap on touch screens. */
-      @media (hover: none) {
-        button.row:hover {
-          background: transparent;
-        }
-
-        button.row:active {
-          background: var(--fill-hover);
-        }
-      }
-
-      .tile {
-        display: grid;
-        flex: none;
-        place-items: center;
-        width: 32px;
-        height: 32px;
-        border-radius: var(--radius);
-        color: var(--text-secondary);
-        background: var(--fill);
-      }
-
-      .tile dds-icon {
-        --icon-size: 18px;
       }
 
       .main {

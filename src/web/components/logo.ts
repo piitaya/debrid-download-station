@@ -1,7 +1,7 @@
 import { LitElement, css, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
-/** The app mark (same drawing as public/icons/icon.svg). */
+/** The app mark (same drawing as public/icons/icon.svg), in the accent colour. */
 @customElement('dds-logo')
 export class DdsLogo extends LitElement {
   @property({ type: Number }) size = 32;
@@ -10,6 +10,7 @@ export class DdsLogo extends LitElement {
     :host {
       display: inline-flex;
       flex: none;
+      color: var(--accent);
     }
 
     svg {
@@ -24,7 +25,7 @@ export class DdsLogo extends LitElement {
       viewBox="0 0 512 512"
       aria-hidden="true"
     >
-      <rect width="512" height="512" rx="112" fill="#007aff" />
+      <rect width="512" height="512" rx="112" fill="currentColor" />
       <path
         d="M256 128v200m-88-88 88 88 88-88M152 384h208"
         fill="none"

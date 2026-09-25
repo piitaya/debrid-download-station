@@ -2,7 +2,8 @@ import type { CategoryIcon, ErrorCode } from '../shared/types.js';
 
 /*
  * Interface copy. Tone: neutral and concise — infinitives for actions, "vous" when a
- * sentence addresses the user, no exclamation marks.
+ * sentence addresses the user, no exclamation marks. French is written with plain spaces before
+ * ? : ; ! and inside « »: `t()` puts the right no-break spaces in.
  */
 const fr = {
   'app.name': 'Debrid Download Station',
@@ -20,6 +21,7 @@ const fr = {
   'login.submit': 'Se connecter',
   'login.nas': 'NAS : {url}',
 
+  'downloads.failed': 'Échecs',
   'downloads.active': 'En cours',
   'downloads.finished': 'Terminés',
   'downloads.clear': 'Effacer',
@@ -28,9 +30,10 @@ const fr = {
   'downloads.add': 'Ajouter un téléchargement',
   'downloads.details': 'Détails',
   'downloads.retry': 'Réessayer',
-  'downloads.cancel': 'Annuler le téléchargement',
-  'downloads.cancelConfirm':
-    'Annuler ce téléchargement ? Il sera aussi supprimé du service debrid et de Download Station.',
+  'downloads.cancel': 'Arrêter le téléchargement',
+  'downloads.cancelTitle': 'Arrêter ce téléchargement ?',
+  'downloads.cancelMessage':
+    'Il est retiré de Download Station et du service debrid. Les fichiers déjà terminés restent sur le NAS.',
   'downloads.remove': 'Retirer de la liste',
   'downloads.files': 'Fichiers',
   'downloads.fileCount': '{count} fichier|{count} fichiers',
@@ -41,12 +44,14 @@ const fr = {
   'downloads.size': 'Taille',
   'downloads.added': 'Ajouté',
   'downloads.of': '{done} sur {total}',
+  'downloads.loading': 'Chargement des téléchargements',
 
   'setup.title': 'Configuration',
   'setup.provider': 'Ajouter une clé API debrid',
   'setup.destination': 'Créer une destination',
   'setup.open': 'Ouvrir les réglages',
   'setup.adminOnly': 'Un administrateur doit terminer la configuration.',
+  'setup.next': 'Ensuite, ajoutez vos liens magnet et fichiers .torrent depuis cet écran.',
 
   'status.queued': 'En attente chez {provider}',
   'status.debrid': 'Récupération par {provider}',
@@ -78,11 +83,15 @@ const fr = {
   'add.submit': 'Ajouter',
   'add.submitCount': 'Ajouter ({count})',
   'add.added': '{count} téléchargement ajouté|{count} téléchargements ajoutés',
-  'add.failed': '{count} élément n’a pas pu être ajouté|{count} éléments n’ont pas pu être ajoutés',
+  'add.failed':
+    '{count} élément n’a pas pu être ajouté.|{count} éléments n’ont pas pu être ajoutés.',
+  'add.othersAdded': 'L’autre a été ajouté.|Les {count} autres ont été ajoutés.',
   'add.notTorrent': '« {name} » n’est pas un fichier .torrent valide.',
   'add.drop': 'Déposer les fichiers .torrent',
   'add.remove': 'Retirer',
   'add.notConfigured': 'Ajoutez d’abord un service debrid et une destination dans les réglages.',
+  'add.notConfiguredUser':
+    'Un administrateur doit d’abord ajouter un service debrid et une destination.',
 
   'settings.services': 'Services debrid',
   'settings.servicesFooter': 'Au moins un service est nécessaire.',
@@ -104,10 +113,9 @@ const fr = {
   'settings.account': 'Compte',
   'settings.signedInAs': 'Connecté en tant que {user}',
   'settings.signOut': 'Se déconnecter',
-  'settings.magnetHandler': 'Ouvrir les liens magnet avec cette app',
+  'settings.magnetHandler': 'Ouvrir les liens magnet avec cette application',
   'settings.magnetHandlerDone': 'Demande envoyée au navigateur.',
   'settings.adminOnly': 'Seuls les administrateurs peuvent modifier ces réglages.',
-  'settings.saved': 'Réglages enregistrés',
   'settings.version': 'Version {version}',
 
   'provider.connected': 'Connecté',
@@ -121,8 +129,14 @@ const fr = {
   'provider.fromEnv': 'Clé définie par la variable d’environnement {name}.',
   'provider.test': 'Tester',
   'provider.save': 'Enregistrer',
+  'provider.saveAnyway': 'Enregistrer quand même',
+  'provider.notValidated':
+    'La clé n’a pas pu être validée. Vérifiez-la, ou enregistrez-la quand même.',
+  'provider.saved': 'Clé enregistrée',
   'provider.remove': 'Supprimer la clé',
-  'provider.removeConfirm': 'Supprimer la clé {name} ?',
+  'provider.removeTitle': 'Supprimer la clé {name} ?',
+  'provider.removeMessage': '{name} ne pourra plus être utilisé pour les nouveaux téléchargements.',
+  'provider.removed': 'Clé supprimée',
   'provider.default': 'Service par défaut',
   'provider.account': 'Compte',
   'provider.premiumUntil': 'Premium jusqu’au {date}',
@@ -142,8 +156,13 @@ const fr = {
   'destination.icon': 'Icône',
   'destination.default': 'Destination par défaut',
   'destination.delete': 'Supprimer la destination',
-  'destination.deleteConfirm':
-    'Supprimer « {name} » ? Les fichiers déjà téléchargés ne sont pas modifiés.',
+  'destination.deleteTitle': 'Supprimer « {name} » ?',
+  'destination.deleteMessage': 'Les fichiers déjà téléchargés ne sont pas modifiés.',
+  'destination.saved': 'Destination enregistrée',
+  'destination.deleted': 'Destination supprimée',
+  'destination.folderMissing': 'Ce dossier n’existe pas encore sur le NAS.',
+  'destination.shareMissing': 'Ce dossier partagé n’existe pas sur le NAS.',
+  'destination.createAndSave': 'Créer le dossier et enregistrer',
 
   'picker.title': 'Choisir un dossier',
   'picker.shares': 'Dossiers partagés',
@@ -174,6 +193,7 @@ const fr = {
   'common.save': 'Enregistrer',
   'common.done': 'OK',
   'common.offline': 'Connexion au serveur perdue. Nouvelle tentative…',
+  'common.detail': 'Détail : {message}',
 
   'time.now': 'À l’instant',
   'time.minutes': 'Il y a {count} min',
@@ -238,6 +258,7 @@ const en: Record<MessageKey, string> = {
   'login.submit': 'Sign in',
   'login.nas': 'NAS: {url}',
 
+  'downloads.failed': 'Failed',
   'downloads.active': 'In progress',
   'downloads.finished': 'Finished',
   'downloads.clear': 'Clear',
@@ -246,9 +267,10 @@ const en: Record<MessageKey, string> = {
   'downloads.add': 'Add a download',
   'downloads.details': 'Details',
   'downloads.retry': 'Retry',
-  'downloads.cancel': 'Cancel download',
-  'downloads.cancelConfirm':
-    'Cancel this download? It will also be removed from the debrid service and Download Station.',
+  'downloads.cancel': 'Stop download',
+  'downloads.cancelTitle': 'Stop this download?',
+  'downloads.cancelMessage':
+    'It is removed from Download Station and the debrid service. Files already finished stay on the NAS.',
   'downloads.remove': 'Remove from list',
   'downloads.files': 'Files',
   'downloads.fileCount': '{count} file|{count} files',
@@ -259,15 +281,17 @@ const en: Record<MessageKey, string> = {
   'downloads.size': 'Size',
   'downloads.added': 'Added',
   'downloads.of': '{done} of {total}',
+  'downloads.loading': 'Loading downloads',
 
   'setup.title': 'Setup',
   'setup.provider': 'Add a debrid API key',
   'setup.destination': 'Create a destination',
   'setup.open': 'Open settings',
   'setup.adminOnly': 'An administrator needs to finish the setup.',
+  'setup.next': 'Then add your magnet links and .torrent files from this screen.',
 
   'status.queued': 'Queued at {provider}',
-  'status.debrid': 'Fetching on {provider}',
+  'status.debrid': 'Fetching via {provider}',
   'status.sending': 'Sending to Download Station',
   'status.waitingLogin': 'NAS sign-in required',
   'status.downloading': 'Downloading to the NAS',
@@ -296,11 +320,14 @@ const en: Record<MessageKey, string> = {
   'add.submit': 'Add',
   'add.submitCount': 'Add ({count})',
   'add.added': '{count} download added|{count} downloads added',
-  'add.failed': '{count} item could not be added|{count} items could not be added',
+  'add.failed': '{count} item could not be added.|{count} items could not be added.',
+  'add.othersAdded': 'The other one was added.|The other {count} were added.',
   'add.notTorrent': '“{name}” is not a valid .torrent file.',
   'add.drop': 'Drop .torrent files',
   'add.remove': 'Remove',
   'add.notConfigured': 'Add a debrid service and a destination in Settings first.',
+  'add.notConfiguredUser':
+    'An administrator needs to add a debrid service and a destination first.',
 
   'settings.services': 'Debrid services',
   'settings.servicesFooter': 'At least one service is required.',
@@ -324,7 +351,6 @@ const en: Record<MessageKey, string> = {
   'settings.magnetHandler': 'Open magnet links with this app',
   'settings.magnetHandlerDone': 'Request sent to the browser.',
   'settings.adminOnly': 'Only administrators can change these settings.',
-  'settings.saved': 'Settings saved',
   'settings.version': 'Version {version}',
 
   'provider.connected': 'Connected',
@@ -338,8 +364,13 @@ const en: Record<MessageKey, string> = {
   'provider.fromEnv': 'Key set by the {name} environment variable.',
   'provider.test': 'Test',
   'provider.save': 'Save',
+  'provider.saveAnyway': 'Save anyway',
+  'provider.notValidated': 'The key could not be validated. Check it, or save it anyway.',
+  'provider.saved': 'Key saved',
   'provider.remove': 'Remove key',
-  'provider.removeConfirm': 'Remove the {name} key?',
+  'provider.removeTitle': 'Remove the {name} key?',
+  'provider.removeMessage': '{name} can no longer be used for new downloads.',
+  'provider.removed': 'Key removed',
   'provider.default': 'Default service',
   'provider.account': 'Account',
   'provider.premiumUntil': 'Premium until {date}',
@@ -359,7 +390,13 @@ const en: Record<MessageKey, string> = {
   'destination.icon': 'Icon',
   'destination.default': 'Default destination',
   'destination.delete': 'Delete destination',
-  'destination.deleteConfirm': 'Delete “{name}”? Files already downloaded are not affected.',
+  'destination.deleteTitle': 'Delete “{name}”?',
+  'destination.deleteMessage': 'Files already downloaded are not affected.',
+  'destination.saved': 'Destination saved',
+  'destination.deleted': 'Destination deleted',
+  'destination.folderMissing': 'This folder does not exist on the NAS yet.',
+  'destination.shareMissing': 'This shared folder does not exist on the NAS.',
+  'destination.createAndSave': 'Create folder and save',
 
   'picker.title': 'Choose a folder',
   'picker.shares': 'Shared folders',
@@ -390,6 +427,7 @@ const en: Record<MessageKey, string> = {
   'common.save': 'Save',
   'common.done': 'Done',
   'common.offline': 'Connection lost. Reconnecting…',
+  'common.detail': 'Details: {message}',
 
   'time.now': 'Just now',
   'time.minutes': '{count} min ago',
@@ -438,7 +476,19 @@ const en: Record<MessageKey, string> = {
 export const locale: 'fr' | 'en' = navigator.language?.toLowerCase().startsWith('fr') ? 'fr' : 'en';
 document.documentElement.lang = locale;
 
-const messages: Record<MessageKey, string> = locale === 'fr' ? fr : en;
+/** French typography: narrow no-break spaces before ? ! ; » and after «, a no-break one before :. */
+const frenchSpacing = (text: string): string =>
+  text
+    .replace(/ ([?!;»])/g, '\u202f$1')
+    .replace(/« /g, '«\u202f')
+    .replace(/ :/g, '\u00a0:');
+
+const messages: Record<MessageKey, string> =
+  locale === 'fr'
+    ? (Object.fromEntries(
+        Object.entries(fr).map(([key, text]) => [key, frenchSpacing(text)]),
+      ) as Record<MessageKey, string>)
+    : en;
 const plural = new Intl.PluralRules(locale);
 
 /**

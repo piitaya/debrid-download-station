@@ -173,6 +173,12 @@ describe('HTTP API', () => {
     expect(shares.data.folders.map((f: { name: string }) => f.name)).toContain('video');
     const sub = await api('GET', `folders?path=${encodeURIComponent('video')}`);
     expect(sub.data.folders).toContainEqual({ name: 'Séries', path: 'video/Séries' });
+    // A mistyped folder is told apart, so that the app can offer to create it.
+    const missing = await api('GET', `folders?path=${encodeURIComponent('video/Filmz')}`);
+    expect(missing).toMatchObject({
+      status: 404,
+      data: { error: { code: 'destination_missing' } },
+    });
     const test = await api('POST', 'providers/alldebrid/test', { apiKey: 'new-key' });
     expect(test.data.username).toBe('demo-alldebrid');
     const saved = await api('PUT', 'settings', {

@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import type { ErrorCode } from '../../shared/types.js';
 import { ApiError } from '../api.js';
 import { errorMessage, t } from '../i18n.js';
 import { mdiAlertCircleOutline } from '../icons.js';
@@ -16,6 +17,7 @@ export class DdsLoginPage extends LitElement {
     ? errorMessage(store.logoutReason)
     : null;
 
+  @query('input[name="password"]') private passwordInput?: HTMLInputElement;
   @query('input[name="otp"]') private otpInput?: HTMLInputElement;
 
   private async submit(event: SubmitEvent): Promise<void> {
@@ -28,24 +30,29 @@ export class DdsLoginPage extends LitElement {
 
     this.busy = true;
     this.error = null;
+    let code: ErrorCode;
     try {
       await store.login(username, password, otp);
+      return;
     } catch (error) {
-      const code = error instanceof ApiError ? error.info.code : 'internal';
-      if (code === 'otp_required') {
-        this.needOtp = true;
-        await this.updateComplete;
-        this.otpInput?.focus();
-      } else {
-        this.error = errorMessage(code);
-        if (code === 'otp_invalid' && this.otpInput) {
-          this.otpInput.value = '';
-          this.otpInput.focus();
-        }
-      }
+      code = error instanceof ApiError ? error.info.code : 'internal';
     } finally {
       this.busy = false;
     }
+
+    if (code === 'otp_required') this.needOtp = true;
+    else this.error = errorMessage(code);
+    // The fields are disabled while signing in: they can take the focus once rendered again.
+    await this.updateComplete;
+    const retry =
+      code === 'otp_required' || code === 'otp_invalid'
+        ? this.otpInput
+        : code === 'invalid_credentials'
+          ? this.passwordInput
+          : undefined;
+    if (!retry) return;
+    if (code !== 'otp_required') retry.value = '';
+    retry.focus();
   }
 
   override render() {
@@ -170,12 +177,19 @@ export class DdsLoginPage extends LitElement {
         color: var(--text-tertiary);
       }
 
-      .fields:focus-within {
-        box-shadow: var(--focus-ring);
+      /* Keyboard and mouse: the group shows where typing goes (touch screens show the keyboard). */
+      @media (pointer: fine) {
+        .fields:focus-within {
+          box-shadow: var(--focus-ring);
+        }
       }
 
       .fields .otp {
         letter-spacing: 0.2em;
+      }
+
+      .fields .otp::placeholder {
+        letter-spacing: normal;
       }
 
       .hint {

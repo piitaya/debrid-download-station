@@ -442,17 +442,26 @@ export class SynologyClient implements NasClient {
   }
 
   async listFolders(sid: string, path: string): Promise<FolderEntry[]> {
-    const data = await this.call<{ files?: { name: string; path: string; isdir?: boolean }[] }>(
-      'SYNO.FileStation.List',
-      'list',
-      {
-        folder_path: JSON.stringify(toFileStationPath(path)),
-        filetype: JSON.stringify('dir'),
-        sort_by: JSON.stringify('name'),
-        sort_direction: JSON.stringify('asc'),
-      },
-      { sid, maxVersion: 2, messages: FILE_MESSAGES },
-    );
+    let data: { files?: { name: string; path: string; isdir?: boolean }[] };
+    try {
+      data = await this.call(
+        'SYNO.FileStation.List',
+        'list',
+        {
+          folder_path: JSON.stringify(toFileStationPath(path)),
+          filetype: JSON.stringify('dir'),
+          sort_by: JSON.stringify('name'),
+          sort_direction: JSON.stringify('asc'),
+        },
+        { sid, maxVersion: 2, messages: FILE_MESSAGES },
+      );
+    } catch (error) {
+      // Lets the web app tell a mistyped folder from other errors.
+      if (error instanceof SynologyApiError && error.synoCode === 408) {
+        throw new AppError('destination_missing', error.message);
+      }
+      throw error;
+    }
     return (data.files ?? [])
       .filter((file) => file.isdir !== false && !isHiddenFolder(file.name))
       .map((file) => ({ name: file.name, path: fromFileStationPath(file.path) }));

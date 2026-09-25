@@ -3,7 +3,8 @@ import { css } from 'lit';
 /*
  * Shared building blocks (components live in shadow roots, so every component includes
  * `sharedStyles`). Visual rules: one accent colour, flat surfaces, no gradients, hairline
- * separators, 8px spacing grid.
+ * separators, 8px spacing grid. Hover styles only apply to devices that can hover: after a tap,
+ * a touch screen would keep them.
  */
 export const sharedStyles = css`
   :host {
@@ -36,10 +37,6 @@ export const sharedStyles = css`
   a {
     color: var(--accent);
     text-decoration: none;
-  }
-
-  a:hover {
-    text-decoration: underline;
   }
 
   button {
@@ -120,10 +117,6 @@ export const sharedStyles = css`
       opacity 0.15s ease;
   }
 
-  .btn:hover {
-    background: var(--fill-hover);
-  }
-
   .btn:active {
     background: var(--fill-pressed);
   }
@@ -143,7 +136,6 @@ export const sharedStyles = css`
     background: var(--accent);
   }
 
-  .btn-primary:hover,
   .btn-primary:active {
     background: var(--accent-pressed);
   }
@@ -159,10 +151,6 @@ export const sharedStyles = css`
     background: transparent;
   }
 
-  .btn-plain:hover {
-    background: var(--accent-fill);
-  }
-
   .btn-plain:active {
     background: var(--accent-fill);
     opacity: 0.8;
@@ -173,7 +161,6 @@ export const sharedStyles = css`
     background: transparent;
   }
 
-  .btn-destructive:hover,
   .btn-destructive:active {
     background: var(--danger-fill);
   }
@@ -183,6 +170,13 @@ export const sharedStyles = css`
     padding: 0 10px;
     font-size: 13px;
     border-radius: var(--radius-sm);
+  }
+
+  @media (pointer: coarse) {
+    .btn-sm {
+      min-height: 36px;
+      font-size: 15px;
+    }
   }
 
   .btn-block {
@@ -202,10 +196,6 @@ export const sharedStyles = css`
     background: transparent;
     cursor: pointer;
     transition: background-color 0.15s ease;
-  }
-
-  .icon-btn:hover {
-    background: var(--fill);
   }
 
   .icon-btn:active {
@@ -346,13 +336,6 @@ export const sharedStyles = css`
     cursor: pointer;
   }
 
-  button.row:hover,
-  a.row:hover,
-  label.row:hover {
-    background: var(--fill);
-    text-decoration: none;
-  }
-
   button.row:active,
   a.row:active {
     background: var(--fill-hover);
@@ -449,6 +432,13 @@ export const sharedStyles = css`
     color: var(--text);
     background: transparent;
     cursor: pointer;
+  }
+
+  @media (pointer: coarse) {
+    .segmented button {
+      min-height: 36px;
+      font-size: 15px;
+    }
   }
 
   .segmented button[aria-pressed='true'] {
@@ -559,6 +549,40 @@ export const sharedStyles = css`
   .notice dds-icon {
     --icon-size: 18px;
     flex: none;
+  }
+
+  /* Pressed styles (:active, above) win over these. */
+  @media (hover: hover) {
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .btn:hover:not(:active) {
+      background: var(--fill-hover);
+    }
+
+    .btn-primary:hover:not(:active) {
+      background: var(--accent-pressed);
+    }
+
+    .btn-plain:hover:not(:active) {
+      background: var(--accent-fill);
+    }
+
+    .btn-destructive:hover:not(:active) {
+      background: var(--danger-fill);
+    }
+
+    .icon-btn:hover:not(:disabled, :active) {
+      background: var(--fill);
+    }
+
+    button.row:hover:not(:disabled, :active),
+    a.row:hover:not(:active),
+    label.row:hover {
+      background: var(--fill);
+      text-decoration: none;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -75,6 +75,7 @@ const STATUS_BY_CODE: Partial<Record<ErrorCode, ContentfulStatusCode>> = {
   torrent_invalid: 400,
   category_missing: 400,
   provider_not_configured: 400,
+  destination_missing: 404,
   nas_not_configured: 503,
   nas_unreachable: 502,
   provider_unreachable: 502,

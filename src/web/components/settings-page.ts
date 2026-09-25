@@ -204,7 +204,10 @@ export class DdsSettingsPage extends LitElement {
           ? [t('provider.error'), 'bad']
           : [t('provider.checking'), ''];
 
-    return html`<button class="row" @click=${() => this.providerSheet.open(id, this.checks[id])}>
+    return html`<button
+      class="row ${lines.length ? 'multiline' : ''}"
+      @click=${() => this.providerSheet.open(id, this.checks[id])}
+    >
       <span class="row-icon initials" aria-hidden="true">${initials(name)}</span>
       <span class="row-main">
         <span class="title-line">
@@ -284,14 +287,14 @@ export class DdsSettingsPage extends LitElement {
     `;
     if (!reordering) {
       return html`<button
-        class="row"
+        class="row multiline"
         data-id=${category.id}
         @click=${() => this.destinationSheet.open(category)}
       >
         ${content}<dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
       </button>`;
     }
-    return html`<div class="row" data-id=${category.id}>
+    return html`<div class="row multiline" data-id=${category.id}>
       ${content}
       <span class="move">
         <button
@@ -406,7 +409,24 @@ export class DdsSettingsPage extends LitElement {
         letter-spacing: -0.2px;
       }
 
-      /* The value sits on the title line, so that subtitles get the full width. */
+      /*
+       * The value sits on the title line, so that subtitles get the full width. In rows with
+       * details, the chevron stays on that line too (like a message list); the icon is centered.
+       */
+      .row.multiline {
+        align-items: flex-start;
+      }
+
+      .row.multiline > .row-icon,
+      .row.multiline > .move {
+        align-self: center;
+      }
+
+      /* Centered on the 21px title line. */
+      .row.multiline > .chevron {
+        margin-top: 1.5px;
+      }
+
       .title-line {
         display: flex;
         align-items: baseline;
@@ -442,7 +462,7 @@ export class DdsSettingsPage extends LitElement {
       }
 
       .row-value.off {
-        color: var(--text-tertiary);
+        color: var(--text-secondary);
       }
 
       .row.accent {
@@ -459,7 +479,7 @@ export class DdsSettingsPage extends LitElement {
         margin-top: 28px;
         font-size: 13px;
         text-align: center;
-        color: var(--text-tertiary);
+        color: var(--text-secondary);
       }
     `,
   ];

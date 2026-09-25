@@ -13,12 +13,14 @@ import { formatDate } from '../format.js';
 import { errorMessage, t } from '../i18n.js';
 import {
   mdiAlertCircleOutline,
+  mdiCheck,
   mdiCheckCircleOutline,
   mdiEyeOffOutline,
   mdiEyeOutline,
   mdiOpenInNew,
 } from '../icons.js';
 import { store, StoreController } from '../store.js';
+import { confirmAction } from './confirm.js';
 import { inlineInputStyles } from './folder-picker.js';
 import './icon.js';
 import type { DdsSheet } from './sheet.js';
@@ -70,8 +72,11 @@ export class DdsProviderSheet extends LitElement {
   @state() private key = '';
   @state() private reveal = false;
   @state() private check: ProviderCheck | null = null;
+  /** Key that `check` is about; null for the saved key. */
+  @state() private checkedKey: string | null = null;
   @state() private saving = false;
   @state() private working = false;
+  @state() private error = '';
 
   @query('dds-sheet') private sheet!: DdsSheet;
   @query('#key') private keyInput?: HTMLInputElement;
@@ -93,9 +98,11 @@ export class DdsProviderSheet extends LitElement {
     this.provider = id;
     this.key = '';
     this.reveal = false;
+    this.error = '';
     this.checkRun++;
     const configured = this.providerState?.configured ?? false;
     this.check = configured && known && known.status !== 'checking' ? known : null;
+    this.checkedKey = null;
     await this.updateComplete;
     await this.sheet.show();
     if (configured && !this.check) void this.test();
@@ -108,16 +115,27 @@ export class DdsProviderSheet extends LitElement {
     );
   }
 
-  /** Tests the typed key, or the saved one. */
-  private async test(): Promise<void> {
+  /**
+   * Tests the typed key, or the saved one. Resolves to the result, or null when it no longer
+   * matters (sheet closed or reopened meanwhile).
+   */
+  private async test(): Promise<ProviderCheck | null> {
     const id = this.provider;
     const key = this.key.trim();
     const run = ++this.checkRun;
     this.check = { status: 'checking' };
+    this.checkedKey = key || null;
     const check = await checkProvider(id, key || undefined);
-    if (run !== this.checkRun) return;
+    if (run !== this.checkRun) return null;
     this.check = check;
     if (!key) this.emitCheck(id, check);
+    return check;
+  }
+
+  /** The typed key was tested and refused: saving it takes a second press. */
+  private get keyRefused(): boolean {
+    const key = this.key.trim();
+    return !!key && this.checkedKey === key && this.check?.status === 'error';
   }
 
   private async save(): Promise<void> {
@@ -125,15 +143,25 @@ export class DdsProviderSheet extends LitElement {
     const key = this.key.trim();
     if (!key || this.saving) return;
     this.saving = true;
+    this.error = '';
     try {
+      // A refused key would only show up at the first download: it is tested first.
+      let check = this.checkedKey === key ? this.check : null;
+      if (!check || check.status === 'checking') {
+        check = await this.test();
+        if (!check) return;
+        if (check.status === 'error') {
+          // The reason shows in the account section; the button now reads « Enregistrer quand même ».
+          this.error = t('provider.notValidated');
+          return;
+        }
+      }
       store.setSettings(await api.updateSettings({ apiKeys: { [id]: key } }));
-      store.toast(t('settings.saved'), 'success');
-      // The new key is checked in the background: the settings page shows the result.
-      this.emitCheck(id, { status: 'checking' });
-      void checkProvider(id).then((check) => this.emitCheck(id, check));
+      this.emitCheck(id, check);
+      store.toast(t('provider.saved'), 'success');
       this.sheet.close();
     } catch (error) {
-      store.toast(errorMessage(errorInfo(error).code), 'error');
+      this.error = errorMessage(errorInfo(error).code);
     } finally {
       this.saving = false;
     }
@@ -143,11 +171,12 @@ export class DdsProviderSheet extends LitElement {
     const input = event.target as HTMLInputElement;
     if (!input.checked) return;
     this.working = true;
+    this.error = '';
     try {
       store.setSettings(await api.updateSettings({ defaultProvider: this.provider }));
     } catch (error) {
       input.checked = false;
-      store.toast(errorMessage(errorInfo(error).code), 'error');
+      this.error = errorMessage(errorInfo(error).code);
     } finally {
       this.working = false;
     }
@@ -155,15 +184,22 @@ export class DdsProviderSheet extends LitElement {
 
   private async removeKey(): Promise<void> {
     const id = this.provider;
-    if (!confirm(t('provider.removeConfirm', { name: PROVIDERS[id].name }))) return;
+    const name = PROVIDERS[id].name;
+    const confirmed = await confirmAction({
+      title: t('provider.removeTitle', { name }),
+      message: t('provider.removeMessage', { name }),
+      confirmLabel: t('provider.remove'),
+    });
+    if (!confirmed) return;
     this.working = true;
+    this.error = '';
     try {
       store.setSettings(await api.updateSettings({ apiKeys: { [id]: null } }));
       this.emitCheck(id, null);
-      store.toast(t('settings.saved'), 'success');
+      store.toast(t('provider.removed'), 'success');
       this.sheet.close();
     } catch (error) {
-      store.toast(errorMessage(errorInfo(error).code), 'error');
+      this.error = errorMessage(errorInfo(error).code);
     } finally {
       this.working = false;
     }
@@ -173,6 +209,8 @@ export class DdsProviderSheet extends LitElement {
     // Does not keep a typed key around.
     this.key = '';
     this.reveal = false;
+    this.error = '';
+    this.checkedKey = null;
     this.checkRun++;
   }
 
@@ -192,9 +230,10 @@ export class DdsProviderSheet extends LitElement {
     return html`
       <dds-sheet
         heading=${provider.name}
-        primaryLabel=${fromEnv ? '' : t('provider.save')}
+        primaryLabel=${fromEnv ? '' : this.keyRefused ? t('provider.saveAnyway') : t('provider.save')}
         ?primaryDisabled=${!this.key.trim() || this.working}
         ?busy=${this.saving}
+        .error=${this.error}
         @dds-primary=${this.save}
         @dds-closed=${this.onClosed}
       >
@@ -211,21 +250,7 @@ export class DdsProviderSheet extends LitElement {
         ${
           configured && configuredCount >= 2
             ? html`<section class="section">
-                <div class="group">
-                  <label class="row ${isDefault ? 'locked' : ''}">
-                    <span class="row-main"
-                      ><span class="row-title">${t('provider.default')}</span></span
-                    >
-                    <input
-                      type="checkbox"
-                      class="switch"
-                      role="switch"
-                      .checked=${live(isDefault)}
-                      ?disabled=${isDefault || this.working}
-                      @change=${this.makeDefault}
-                    />
-                  </label>
-                </div>
+                <div class="group">${this.renderDefault(isDefault)}</div>
               </section>`
             : nothing
         }
@@ -246,6 +271,27 @@ export class DdsProviderSheet extends LitElement {
         }
       </dds-sheet>
     `;
+  }
+
+  /** The default service shows a check: another service is made the default from its own sheet. */
+  private renderDefault(isDefault: boolean) {
+    if (isDefault) {
+      return html`<div class="row">
+        <span class="row-main"><span class="row-title">${t('provider.default')}</span></span>
+        <dds-icon class="check" .path=${mdiCheck}></dds-icon>
+      </div>`;
+    }
+    return html`<label class="row">
+      <span class="row-main"><span class="row-title">${t('provider.default')}</span></span>
+      <input
+        type="checkbox"
+        class="switch"
+        role="switch"
+        .checked=${live(false)}
+        ?disabled=${this.working}
+        @change=${this.makeDefault}
+      />
+    </label>`;
   }
 
   private renderCheck(check: ProviderCheck) {
@@ -273,7 +319,7 @@ export class DdsProviderSheet extends LitElement {
         <span class="row-title danger-text">${errorMessage(check.error.code)}</span>
         ${
           raw && raw !== check.error.code
-            ? html`<span class="row-subtitle wrap">${raw}</span>`
+            ? html`<span class="row-subtitle wrap">${t('common.detail', { message: raw })}</span>`
             : nothing
         }
       </span>
@@ -304,7 +350,10 @@ export class DdsProviderSheet extends LitElement {
             autocapitalize="off"
             autocorrect="off"
             spellcheck="false"
-            @input=${(event: Event) => (this.key = (event.target as HTMLInputElement).value)}
+            @input=${(event: Event) => {
+              this.key = (event.target as HTMLInputElement).value;
+              this.error = '';
+            }}
             @keydown=${this.onKeyDown}
           />
           <button
@@ -394,14 +443,6 @@ export class DdsProviderSheet extends LitElement {
 
       .actions a dds-icon {
         --icon-size: 16px;
-      }
-
-      label.row.locked {
-        cursor: default;
-      }
-
-      label.row.locked:hover {
-        background: transparent;
       }
 
       code {

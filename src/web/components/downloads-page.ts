@@ -4,7 +4,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import type { JobView } from '../../shared/types.js';
 import { api, ApiError } from '../api.js';
 import { errorMessage, t } from '../i18n.js';
-import { mdiCheckCircle, mdiCircleOutline, mdiTrayArrowDown } from '../icons.js';
+import { mdiCheckCircle, mdiChevronRight, mdiCircleOutline, mdiTrayArrowDown } from '../icons.js';
 import { store, StoreController } from '../store.js';
 import './download-row.js';
 import type { DdsDownloadSheet } from './download-sheet.js';
@@ -12,10 +12,11 @@ import './download-sheet.js';
 import './icon.js';
 import { sharedStyles } from './styles.js';
 
+const isFailed = (job: JobView) => job.status === 'error';
 const isFinished = (job: JobView) => job.status === 'completed' || job.status === 'cancelled';
 const finishedAt = (job: JobView) => job.finishedAt ?? job.updatedAt;
 
-/** Home screen: setup checklist, running and finished downloads. */
+/** Home screen: setup checklist, failed, running and finished downloads. */
 @customElement('dds-downloads-page')
 export class DdsDownloadsPage extends LitElement {
   @state() private clearing = false;
@@ -65,52 +66,65 @@ export class DdsDownloadsPage extends LitElement {
     const hasDestination = settings ? settings.categories.length > 0 : true;
     const configured = hasProvider && hasDestination;
 
-    const jobs = store.jobs;
-    // Failed jobs stay with the running ones, where they can be retried.
-    const active = jobs.filter((job) => !isFinished(job)).sort((a, b) => b.createdAt - a.createdAt);
-    const finished = jobs.filter(isFinished).sort((a, b) => finishedAt(b) - finishedAt(a));
-
     return html`
       ${configured ? nothing : this.renderSetup(hasProvider, hasDestination)}
-      ${
-        jobs.length
-          ? html`
-              ${this.renderSection(t('downloads.active'), active)}
-              ${this.renderSection(
-                t('downloads.finished'),
-                finished,
-                html`<button class="btn btn-plain" ?disabled=${this.clearing} @click=${this.clear}>
-                  ${t('downloads.clear')}
-                </button>`,
-              )}
-            `
-          : this.renderEmpty(configured)
-      }
+      ${store.jobsLoaded ? this.renderJobs(configured) : this.renderLoading()}
       <dds-download-sheet></dds-download-sheet>
+    `;
+  }
+
+  private renderJobs(configured: boolean) {
+    const jobs = store.jobs;
+    if (!jobs.length) return configured ? this.renderEmpty() : nothing;
+
+    // Failures first: they wait for a retry or to be removed.
+    const failed = jobs.filter(isFailed).sort((a, b) => b.updatedAt - a.updatedAt);
+    const active = jobs
+      .filter((job) => !isFailed(job) && !isFinished(job))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const finished = jobs.filter(isFinished).sort((a, b) => finishedAt(b) - finishedAt(a));
+    return html`
+      ${this.renderSection(t('downloads.failed'), failed)}
+      ${this.renderSection(t('downloads.active'), active)}
+      ${this.renderSection(
+        t('downloads.finished'),
+        finished,
+        html`<button class="btn btn-plain" ?disabled=${this.clearing} @click=${this.clear}>
+          ${t('downloads.clear')}
+        </button>`,
+      )}
     `;
   }
 
   private renderSetup(hasProvider: boolean, hasDestination: boolean) {
     const admin = store.session?.user.isAdmin ?? false;
-    const step = (done: boolean, title: string) =>
-      html`<div class="row step ${done ? 'done' : ''}">
-        <span
-          class="step-icon"
-          role=${done ? 'img' : nothing}
-          aria-label=${done ? t('status.completed') : nothing}
-        >
-          <dds-icon .path=${done ? mdiCheckCircle : mdiCircleOutline}></dds-icon>
-        </span>
-        <span class="row-title">${title}</span>
-      </div>`;
+    const step = (done: boolean, title: string) => {
+      const icon = html`<span
+        class="step-icon"
+        role=${done ? 'img' : nothing}
+        aria-label=${done ? t('status.completed') : nothing}
+      >
+        <dds-icon .path=${done ? mdiCheckCircle : mdiCircleOutline}></dds-icon>
+      </span>`;
+      // What is left to do opens the settings (administrators only).
+      if (done || !admin) {
+        return html`<div class="row step ${done ? 'done' : ''}">
+          ${icon}<span class="row-title">${title}</span>
+        </div>`;
+      }
+      return html`<a class="row step" href="#/settings">
+        ${icon}
+        <span class="row-main"><span class="row-title">${title}</span></span>
+        <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
+      </a>`;
+    };
     return html`
       <section class="section">
         <h2 class="section-header">${t('setup.title')}</h2>
         <div class="group with-icons">
           ${step(hasProvider, t('setup.provider'))} ${step(hasDestination, t('setup.destination'))}
-          ${admin ? html`<a class="row action" href="#/settings">${t('setup.open')}</a>` : nothing}
         </div>
-        ${admin ? nothing : html`<p class="section-footer">${t('setup.adminOnly')}</p>`}
+        <p class="section-footer">${admin ? t('setup.next') : t('setup.adminOnly')}</p>
       </section>
     `;
   }
@@ -138,19 +152,19 @@ export class DdsDownloadsPage extends LitElement {
     `;
   }
 
-  private renderEmpty(configured: boolean) {
+  private renderLoading() {
+    return html`<div class="loading" role="status" aria-label=${t('downloads.loading')}>
+      <span class="spinner"></span>
+    </div>`;
+  }
+
+  private renderEmpty() {
     return html`
-      <div class="empty ${configured ? '' : 'compact'}">
+      <div class="empty">
         <dds-icon class="empty-icon" .path=${mdiTrayArrowDown}></dds-icon>
         <h2 class="empty-title">${t('downloads.empty')}</h2>
         <p class="empty-text">${t('downloads.emptyHint')}</p>
-        ${
-          configured
-            ? html`<button class="btn btn-primary" @click=${this.openAdd}>
-                ${t('downloads.add')}
-              </button>`
-            : nothing
-        }
+        <button class="btn btn-primary" @click=${this.openAdd}>${t('downloads.add')}</button>
       </div>
     `;
   }
@@ -167,7 +181,7 @@ export class DdsDownloadsPage extends LitElement {
         font-weight: 400;
       }
 
-      /* Hairlines between rows, aligned with the text column (16 + 32 tile + 12). */
+      /* Hairlines between rows, aligned with the text column (16 + 28 icon + 12). */
       .rows > dds-download-row {
         position: relative;
       }
@@ -177,7 +191,7 @@ export class DdsDownloadsPage extends LitElement {
         position: absolute;
         top: 0;
         right: 0;
-        left: 60px;
+        left: 56px;
         z-index: 1;
         height: 1px;
         background: var(--separator);
@@ -207,6 +221,23 @@ export class DdsDownloadsPage extends LitElement {
         color: var(--text-secondary);
       }
 
+      a.step {
+        color: inherit;
+      }
+
+      a.step:focus-visible {
+        box-shadow: inset var(--focus-ring);
+      }
+
+      /* Only shows when the list takes a while to arrive. */
+      .loading {
+        display: grid;
+        place-items: center;
+        min-height: calc(100dvh - 240px);
+        color: var(--text-tertiary);
+        animation: appear 0.3s ease 0.4s both;
+      }
+
       .empty {
         display: grid;
         align-content: center;
@@ -215,13 +246,7 @@ export class DdsDownloadsPage extends LitElement {
         min-height: calc(100dvh - 240px);
         padding: 24px 16px;
         text-align: center;
-        /* Waits a moment: the list usually arrives right after the page shows. */
-        animation: appear 0.3s ease 0.2s both;
-      }
-
-      .empty.compact {
-        min-height: 0;
-        padding-top: 48px;
+        animation: appear 0.3s ease both;
       }
 
       @keyframes appear {

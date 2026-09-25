@@ -16,6 +16,8 @@ class Store extends EventTarget {
   logoutReason: ErrorCode | null = null;
   settings: AppSettings | null = null;
   jobs: JobView[] = [];
+  /** The first list of downloads has arrived (until then, an empty list means nothing). */
+  jobsLoaded = false;
   /** False while the live connection to the server is down. */
   online = true;
   toasts: Toast[] = [];
@@ -23,6 +25,7 @@ class Store extends EventTarget {
   private events: EventSource | null = null;
   private toastId = 0;
   private checkingSession: Promise<void> | null = null;
+  private checkingAccess = false;
 
   constructor() {
     super();
@@ -42,13 +45,18 @@ class Store extends EventTarget {
       await this.afterLogin();
     } catch (error) {
       this.session = null;
-      if (error instanceof ApiError && error.info.code === 'nas_session_expired') {
-        this.logoutReason = 'nas_session_expired';
+      if (!(error instanceof ApiError && error.status === 401)) {
+        // Server out of reach (being restarted…): tries again instead of asking to sign in.
+        this.online = false;
+        this.changed();
+        setTimeout(() => void this.init(), 3000);
+        return;
       }
-    } finally {
-      this.ready = true;
-      this.changed();
+      if (error.info.code === 'nas_session_expired') this.logoutReason = 'nas_session_expired';
     }
+    this.ready = true;
+    this.online = true;
+    this.changed();
   }
 
   async login(username: string, password: string, otp?: string): Promise<void> {
@@ -60,6 +68,8 @@ class Store extends EventTarget {
 
   async logout(): Promise<void> {
     await api.logout().catch(() => undefined);
+    // The next person to sign in starts from the downloads.
+    if (location.hash) history.replaceState(null, '', `${location.pathname}${location.search}`);
     this.reset(null);
   }
 
@@ -74,17 +84,28 @@ class Store extends EventTarget {
     this.session = null;
     this.settings = null;
     this.jobs = [];
+    this.jobsLoaded = false;
     this.logoutReason = reason;
     this.changed();
   }
 
+  /**
+   * A request was refused or the live connection closed: signs out only if the server says the
+   * session is over. A server being restarted or out of reach only means offline.
+   */
   private handleUnauthorized(): void {
-    if (!this.session) return;
-    // Find out why (app session vs NAS session) to show the right message.
-    api.session().catch((error: unknown) => {
-      const code = error instanceof ApiError ? error.info.code : 'unauthorized';
-      this.reset(code === 'nas_session_expired' ? code : 'unauthorized');
-    });
+    if (!this.session || this.checkingAccess) return;
+    this.checkingAccess = true;
+    api
+      .session()
+      .catch((error: unknown) => {
+        if (!(error instanceof ApiError) || error.status !== 401) return;
+        // Tells the app session from the NAS session, for the message on the login screen.
+        this.reset(error.info.code === 'nas_session_expired' ? error.info.code : 'unauthorized');
+      })
+      .finally(() => {
+        this.checkingAccess = false;
+      });
   }
 
   /** Re-checks the session and the live connection, e.g. when the app comes back to foreground. */
@@ -113,6 +134,7 @@ class Store extends EventTarget {
     });
     source.addEventListener('snapshot', (event) => {
       this.jobs = (JSON.parse((event as MessageEvent<string>).data) as { jobs: JobView[] }).jobs;
+      this.jobsLoaded = true;
       this.changed();
     });
     source.addEventListener('job', (event) => {

@@ -1,13 +1,35 @@
 import { LitElement, css, html, nothing } from 'lit';
-import { customElement, property, query } from 'lit/decorators.js';
+import { customElement, property, query, state } from 'lit/decorators.js';
 import { t } from '../i18n.js';
-import { mdiClose } from '../icons.js';
+import { mdiAlertCircleOutline, mdiClose } from '../icons.js';
 import './icon.js';
 import { sharedStyles } from './styles.js';
+
+/** Open sheets, counted to keep the page behind them still (sheets can be stacked). */
+let openSheets = 0;
+
+function lockPageScroll(): void {
+  if (openSheets++) return;
+  const root = document.documentElement;
+  // The scrollbar goes away: its width is kept so that the page does not shift sideways.
+  const scrollbar = window.innerWidth - root.clientWidth;
+  root.style.overflow = 'hidden';
+  if (scrollbar > 0) root.style.paddingRight = `${scrollbar}px`;
+}
+
+function unlockPageScroll(): void {
+  if (--openSheets > 0) return;
+  const root = document.documentElement;
+  root.style.overflow = '';
+  root.style.paddingRight = '';
+}
 
 /**
  * Modal panel used for every secondary screen: a bottom sheet on phones, a centered dialog on
  * larger screens. Content goes in the default slot.
+ *
+ * Errors of the sheet's actions go in `error`: they show above the footer, whatever the scroll
+ * position (toasts would be hidden behind the sheet).
  *
  * Events: `dds-primary` when the primary button is pressed, `dds-closed` once closed.
  */
@@ -21,8 +43,18 @@ export class DdsSheet extends LitElement {
   @property({ type: Boolean }) busy = false;
   /** Wider panel on large screens. */
   @property({ type: Boolean }) wide = false;
+  /** Fixed height, for content that changes while the sheet is open (folder picker). */
+  @property({ type: Boolean }) tall = false;
+  /** Error message shown above the footer. */
+  @property() error = '';
+
+  /** The content is scrolled: a hairline separates it from the header. */
+  @state() private scrolled = false;
 
   @query('dialog') private dialog!: HTMLDialogElement;
+
+  /** This sheet keeps the page from scrolling. */
+  private locking = false;
 
   get open(): boolean {
     return this.dialog?.open ?? false;
@@ -30,11 +62,33 @@ export class DdsSheet extends LitElement {
 
   async show(): Promise<void> {
     await this.updateComplete;
-    if (!this.dialog.open) this.dialog.showModal();
+    if (this.dialog.open) return;
+    this.scrolled = false;
+    this.dialog.showModal();
+    this.lock(true);
   }
 
   close(): void {
     if (this.dialog?.open) this.dialog.close();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    // Removed while open (signed out, another download shown…): the page must scroll again.
+    this.lock(false);
+    this.dialog?.close();
+  }
+
+  private lock(locked: boolean): void {
+    if (locked === this.locking) return;
+    this.locking = locked;
+    if (locked) lockPageScroll();
+    else unlockPageScroll();
+  }
+
+  private onClose(): void {
+    this.lock(false);
+    this.dispatchEvent(new CustomEvent('dds-closed'));
   }
 
   private onClick(event: MouseEvent): void {
@@ -49,28 +103,48 @@ export class DdsSheet extends LitElement {
     if (!inside) this.close();
   }
 
+  private onScroll(event: Event): void {
+    const scrolled = (event.target as HTMLElement).scrollTop > 0;
+    if (scrolled !== this.scrolled) this.scrolled = scrolled;
+  }
+
   private primary(): void {
     if (this.primaryDisabled || this.busy) return;
     this.dispatchEvent(new CustomEvent('dds-primary'));
   }
 
   override render() {
+    const footer = !!this.primaryLabel;
+    const classes = [
+      this.wide ? 'wide' : '',
+      this.tall ? 'tall' : '',
+      footer ? 'has-footer' : '',
+      this.error ? 'has-error' : '',
+    ];
     return html`
       <dialog
-        class=${this.wide ? 'wide' : ''}
+        class=${classes.filter(Boolean).join(' ')}
         aria-label=${this.heading}
         @click=${this.onClick}
-        @close=${() => this.dispatchEvent(new CustomEvent('dds-closed'))}
+        @close=${this.onClose}
       >
-        <header>
+        <header class=${this.scrolled ? 'scrolled' : ''}>
           <h2>${this.heading}</h2>
-          <button class="icon-btn" aria-label=${t('common.close')} @click=${() => this.close()}>
+          <button class="close" aria-label=${t('common.close')} @click=${() => this.close()}>
             <dds-icon .path=${mdiClose}></dds-icon>
           </button>
         </header>
-        <div class="body"><slot></slot></div>
+        <div class="body" @scroll=${this.onScroll}><slot></slot></div>
         ${
-          this.primaryLabel
+          this.error
+            ? html`<div class="error" role="alert">
+                <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
+                <span>${this.error}</span>
+              </div>`
+            : nothing
+        }
+        ${
+          footer
             ? html`<footer>
                 <button class="btn cancel" @click=${() => this.close()}>
                   ${t('common.cancel')}
@@ -114,13 +188,17 @@ export class DdsSheet extends LitElement {
         --bg-elevated: var(--bg-sheet-content);
       }
 
+      dialog.tall {
+        height: min(680px, calc(100dvh - env(safe-area-inset-top) - 16px));
+      }
+
       dialog[open] {
         display: flex;
         animation: slide-up 0.32s cubic-bezier(0.32, 0.72, 0, 1);
       }
 
       dialog::backdrop {
-        background: rgba(0, 0, 0, 0.4);
+        background: var(--overlay);
         animation: fade-in 0.2s ease;
       }
 
@@ -136,13 +214,21 @@ export class DdsSheet extends LitElement {
         }
       }
 
+      /* The × circle ends where the groups end (16px from the edge), its hit area is 44px. */
       header {
+        position: relative;
+        z-index: 1;
         display: flex;
         flex: none;
         align-items: center;
         gap: 8px;
         min-height: 56px;
-        padding: 8px 8px 8px 20px;
+        padding: 6px 9px 6px 16px;
+        transition: box-shadow 0.15s ease;
+      }
+
+      header.scrolled {
+        box-shadow: 0 0.5px 0 var(--separator);
       }
 
       h2 {
@@ -155,15 +241,51 @@ export class DdsSheet extends LitElement {
         white-space: nowrap;
       }
 
-      header .icon-btn {
-        width: 32px;
-        height: 32px;
+      .close {
+        position: relative;
+        display: grid;
+        flex: none;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: none;
         border-radius: 50%;
-        background: var(--fill);
+        color: var(--text-secondary);
+        background: none;
+        cursor: pointer;
       }
 
-      header .icon-btn dds-icon {
+      .close::before {
+        content: '';
+        position: absolute;
+        inset: 7px;
+        border-radius: 50%;
+        background: var(--fill);
+        transition: background-color 0.15s ease;
+      }
+
+      @media (hover: hover) {
+        .close:hover::before {
+          background: var(--fill-hover);
+        }
+      }
+
+      .close:active::before {
+        background: var(--fill-pressed);
+      }
+
+      .close:focus-visible {
+        box-shadow: none;
+      }
+
+      .close:focus-visible::before {
+        box-shadow: var(--focus-ring);
+      }
+
+      .close dds-icon {
         --icon-size: 18px;
+        position: relative;
       }
 
       .body {
@@ -172,6 +294,38 @@ export class DdsSheet extends LitElement {
         padding: 4px 16px 20px;
         overflow-y: auto;
         overscroll-behavior: contain;
+      }
+
+      /* Nothing below the content on phones but the home indicator. */
+      dialog:not(.has-footer) .body {
+        padding-bottom: calc(20px + env(safe-area-inset-bottom));
+      }
+
+      dialog.has-error .body {
+        padding-bottom: 12px;
+      }
+
+      .error {
+        display: flex;
+        flex: none;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0 16px 12px;
+        padding: 10px 12px;
+        border-radius: var(--radius);
+        font-size: 13px;
+        color: var(--danger);
+        background: var(--danger-fill);
+        animation: fade-in 0.15s ease;
+      }
+
+      dialog:not(.has-footer) .error {
+        margin-bottom: calc(16px + env(safe-area-inset-bottom));
+      }
+
+      .error dds-icon {
+        --icon-size: 18px;
+        flex: none;
       }
 
       footer {
@@ -207,6 +361,10 @@ export class DdsSheet extends LitElement {
           width: min(640px, calc(100% - 48px));
         }
 
+        dialog.tall {
+          height: min(600px, calc(100dvh - 64px));
+        }
+
         dialog[open] {
           animation: pop-in 0.18s ease-out;
         }
@@ -216,6 +374,18 @@ export class DdsSheet extends LitElement {
             opacity: 0;
             transform: scale(0.97);
           }
+        }
+
+        dialog:not(.has-footer) .body {
+          padding-bottom: 20px;
+        }
+
+        dialog.has-error .body {
+          padding-bottom: 12px;
+        }
+
+        dialog:not(.has-footer) .error {
+          margin-bottom: 16px;
         }
 
         footer {

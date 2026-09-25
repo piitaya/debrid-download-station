@@ -82,6 +82,11 @@ export class DdsApp extends LitElement {
     this.removeEventListener('dds-open-add', this.onOpenAdd);
   }
 
+  override willUpdate(): void {
+    // Signed out: the next session starts from the page in the address (reset on sign-out).
+    if (!store.session) this.route = routeFromHash();
+  }
+
   override updated(): void {
     // A magnet link from the URL opens the add sheet once signed in.
     if (this.pendingMagnet && store.session && store.settings && this.addSheet) {
@@ -147,7 +152,12 @@ export class DdsApp extends LitElement {
   }
 
   override render() {
-    if (!store.ready) return html`<div class="splash"><dds-logo size="56"></dds-logo></div>`;
+    if (!store.ready) {
+      return html`<div class="splash">
+        <dds-logo size="56"></dds-logo>
+        ${store.online ? nothing : html`<p class="splash-status">${t('common.offline')}</p>`}
+      </div>`;
+    }
     if (!store.session) {
       return html`<dds-login-page></dds-login-page>${this.renderToasts()}`;
     }
@@ -156,17 +166,19 @@ export class DdsApp extends LitElement {
     return html`
       <header class="bar">
         <div class="bar-inner">
-          ${
-            settings
-              ? html`<button
-                  class="icon-btn accent back"
-                  aria-label=${t('nav.back')}
-                  @click=${() => this.navigate('downloads')}
-                >
-                  <dds-icon .path=${mdiChevronLeft}></dds-icon>
-                </button>`
-              : html`<dds-logo size="26" class="brand"></dds-logo>`
-          }
+          <div class="leading">
+            ${
+              settings
+                ? html`<button
+                    class="icon-btn accent back"
+                    aria-label=${t('nav.back')}
+                    @click=${() => this.navigate('downloads')}
+                  >
+                    <dds-icon .path=${mdiChevronLeft}></dds-icon>
+                  </button>`
+                : html`<dds-logo size="26"></dds-logo>`
+            }
+          </div>
           <h1>${settings ? t('nav.settings') : t('nav.downloads')}</h1>
           ${
             settings
@@ -181,12 +193,15 @@ export class DdsApp extends LitElement {
                     <dds-icon .path=${mdiCogOutline}></dds-icon>
                   </button>
                   <button
-                    class="btn btn-primary add"
+                    class="add"
                     aria-label=${t('downloads.add')}
                     title=${t('downloads.add')}
                     @click=${this.onOpenAdd}
                   >
-                    <dds-icon .path=${mdiPlus}></dds-icon><span>${t('nav.add')}</span>
+                    <span class="add-shape">
+                      <dds-icon .path=${mdiPlus}></dds-icon
+                      ><span class="add-label">${t('nav.add')}</span>
+                    </span>
                   </button>
                 `
           }
@@ -242,9 +257,30 @@ export class DdsApp extends LitElement {
     css`
       .splash {
         display: grid;
-        place-items: center;
+        place-content: center;
+        justify-items: center;
+        gap: 20px;
         min-height: 100vh;
         min-height: 100dvh;
+        padding: 24px;
+        text-align: center;
+      }
+
+      /* Only shows when loading takes a while: most of the time the app is there at once. */
+      .splash dds-logo {
+        animation: appear 0.3s ease 0.5s both;
+      }
+
+      .splash-status {
+        font-size: 13px;
+        color: var(--text-secondary);
+        animation: appear 0.3s ease both;
+      }
+
+      @keyframes appear {
+        from {
+          opacity: 0;
+        }
       }
 
       .bar {
@@ -265,15 +301,22 @@ export class DdsApp extends LitElement {
         max-width: 760px;
         min-height: 52px;
         margin: 0 auto;
-        padding: 0 max(12px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+        padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
       }
 
-      .brand {
-        margin-right: 8px;
+      /* Logo or back button: the title starts at the same place on every page. */
+      .leading {
+        display: flex;
+        flex: none;
+        align-items: center;
+        width: 34px;
       }
 
+      /* The chevron lines up with the content, the button reaches over the margin. */
       .back {
-        margin-left: -8px;
+        width: 44px;
+        margin-left: -10px;
+        place-items: center start;
       }
 
       .back dds-icon {
@@ -287,25 +330,78 @@ export class DdsApp extends LitElement {
         font-weight: 600;
       }
 
+      /* The button is the hit area, .add-shape what shows. */
       .add {
+        display: grid;
+        flex: none;
+        place-items: center;
         margin-left: 4px;
-        padding: 0 12px 0 10px;
+        padding: 0;
+        border: none;
+        font: inherit;
+        background: none;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
       }
 
-      /* Phones: a round "+" button. */
+      .add-shape {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: var(--control-height);
+        padding: 0 14px 0 10px;
+        border-radius: var(--radius);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-on-accent);
+        background: var(--accent);
+        transition: background-color 0.15s ease;
+      }
+
+      .add-shape dds-icon {
+        --icon-size: 18px;
+      }
+
+      .add:active .add-shape {
+        background: var(--accent-pressed);
+      }
+
+      @media (hover: hover) {
+        .add:hover .add-shape {
+          background: var(--accent-pressed);
+        }
+      }
+
+      .add:focus-visible {
+        box-shadow: none;
+      }
+
+      .add:focus-visible .add-shape {
+        box-shadow: var(--focus-ring);
+      }
+
+      /* Phones: a round "+" in a 44px hit area, its edge on the content edge. */
       @media (max-width: 639px) {
         .add {
+          width: 44px;
+          height: 44px;
+          margin-right: -5px;
+        }
+
+        .add-shape {
+          justify-content: center;
           width: 34px;
-          min-height: 34px;
+          height: 34px;
           padding: 0;
           border-radius: 50%;
         }
 
-        .add span {
+        .add-label {
           display: none;
         }
 
-        .add dds-icon {
+        .add-shape dds-icon {
           --icon-size: 22px;
         }
       }
@@ -391,8 +487,8 @@ export class DdsApp extends LitElement {
         font-size: 14px;
         font-weight: 500;
         text-align: left;
-        color: #fff;
-        background: rgba(28, 28, 30, 0.94);
+        color: var(--toast-text);
+        background: var(--toast-bg);
         box-shadow: var(--shadow-overlay);
         pointer-events: auto;
         cursor: pointer;
@@ -401,21 +497,16 @@ export class DdsApp extends LitElement {
 
       .toast dds-icon {
         --icon-size: 20px;
-        color: #8e8e93;
+        flex: none;
+        color: var(--toast-icon);
       }
 
       .toast.success dds-icon {
-        color: #30d158;
+        color: var(--toast-success);
       }
 
       .toast.error dds-icon {
-        color: #ff453a;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        .toast {
-          background: #2c2c2e;
-        }
+        color: var(--toast-danger);
       }
 
       @keyframes toast-in {

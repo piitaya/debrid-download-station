@@ -4,7 +4,7 @@ import { extractMagnets, type MagnetInfo } from '../../shared/magnet.js';
 import { parseTorrent } from '../../shared/torrent.js';
 import { PROVIDERS, type Category, type ProviderId } from '../../shared/types.js';
 import { api, ApiError } from '../api.js';
-import { formatBytes } from '../format.js';
+import { breakable, formatBytes } from '../format.js';
 import { errorMessage, t } from '../i18n.js';
 import {
   categoryIcon,
@@ -27,11 +27,6 @@ interface TorrentItem {
   name: string;
   size: number;
   fileCount: number;
-}
-
-interface Failure {
-  input: string;
-  message: string;
 }
 
 const STORAGE_PROVIDER = 'dds.provider';
@@ -67,6 +62,18 @@ const hasFinePointer = window.matchMedia('(pointer: fine)').matches;
 const shortHash = (hash: string) =>
   hash.length > 16 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
 
+/** Moves within the destinations with the arrow keys. */
+const ARROW_STEPS: Record<string, number> = {
+  ArrowDown: 1,
+  ArrowRight: 1,
+  ArrowUp: -1,
+  ArrowLeft: -1,
+};
+
+/** Lines of the text in which no magnet link (or info-hash) was found. */
+const unrecognizedLines = (text: string) =>
+  text.split('\n').filter((line) => line.trim() && !extractMagnets(line).magnets.length).length;
+
 @customElement('dds-add-sheet')
 export class DdsAddSheet extends LitElement {
   @state() private text = '';
@@ -74,7 +81,14 @@ export class DdsAddSheet extends LitElement {
   @state() private provider: ProviderId | null = null;
   @state() private categoryId: string | null = null;
   @state() private busy = false;
-  @state() private failures: Failure[] = [];
+  /** Files that are not .torrent files. */
+  @state() private rejectedFiles: string[] = [];
+  /** Why the server refused items, by magnet URI or file name. */
+  @state() private failures = new Map<string, string>();
+  /** Items added by the last submit that also had failures. */
+  @state() private addedCount = 0;
+  /** The request itself failed. */
+  @state() private error = '';
 
   @query('dds-sheet') private sheet!: DdsSheet;
   @query('textarea') private textarea?: HTMLTextAreaElement;
@@ -93,10 +107,15 @@ export class DdsAddSheet extends LitElement {
 
   /** Opens the sheet, optionally with links or .torrent files to add. */
   async open(options: { text?: string; files?: File[] } = {}): Promise<void> {
+    // Opened as soon as created (magnet link in the address): the sheet is not rendered yet.
+    await this.updateComplete;
     if (!this.isOpen) {
       this.text = '';
       this.torrents = [];
-      this.failures = [];
+      this.rejectedFiles = [];
+      this.failures = new Map();
+      this.addedCount = 0;
+      this.error = '';
     }
     if (options.text?.trim()) this.appendText(options.text);
     if (options.files?.length) await this.addFiles(options.files);
@@ -171,7 +190,9 @@ export class DdsAddSheet extends LitElement {
           },
         ];
       } catch {
-        store.toast(t('add.notTorrent', { name: file.name }), 'error');
+        if (!this.rejectedFiles.includes(file.name)) {
+          this.rejectedFiles = [...this.rejectedFiles, file.name];
+        }
       }
     }
   }
@@ -181,11 +202,22 @@ export class DdsAddSheet extends LitElement {
     this.fileInput.value = '';
   }
 
+  private onTextKeyDown(event: KeyboardEvent): void {
+    // Cmd/Ctrl + Enter adds, Enter alone goes to the next line.
+    if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.isComposing) return;
+    event.preventDefault();
+    void this.submit();
+  }
+
   private removeMagnet(magnet: MagnetInfo): void {
     this.text = this.text
       .split(/\s+/)
       .filter((token) => token && !token.includes(magnet.hash ?? magnet.uri))
       .join('\n');
+  }
+
+  private removeTorrent(torrent: TorrentItem): void {
+    this.torrents = this.torrents.filter((item) => item.id !== torrent.id);
   }
 
   private selectProvider(id: ProviderId): void {
@@ -198,11 +230,23 @@ export class DdsAddSheet extends LitElement {
     writeStorage(STORAGE_CATEGORY, id);
   }
 
+  /** Arrow keys move the choice within the destinations (one tab stop for the group). */
+  private async onChoiceKeyDown(event: KeyboardEvent, index: number): Promise<void> {
+    const categories = store.settings?.categories ?? [];
+    const step = ARROW_STEPS[event.key];
+    if (!step || !categories.length) return;
+    event.preventDefault();
+    const next = categories[(index + step + categories.length) % categories.length]!;
+    this.selectCategory(next.id);
+    await this.updateComplete;
+    this.renderRoot.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+  }
+
   private async submit(): Promise<void> {
     const provider = this.selectedProvider;
     const category = this.selectedCategory;
     const { magnets } = extractMagnets(this.text);
-    if (!provider || !category || (!magnets.length && !this.torrents.length)) return;
+    if (this.busy || !provider || !category || (!magnets.length && !this.torrents.length)) return;
 
     const form = new FormData();
     form.set('provider', provider);
@@ -211,45 +255,65 @@ export class DdsAddSheet extends LitElement {
     for (const torrent of this.torrents) form.append('torrents', torrent.file, torrent.file.name);
 
     this.busy = true;
-    this.failures = [];
+    this.error = '';
+    this.failures = new Map();
+    this.addedCount = 0;
     try {
       const { results } = await api.addJobs(form);
-      const failures: Failure[] = [];
+      const failures = new Map<string, string>();
       let added = 0;
       for (const result of results) {
         if (result.ok) {
           store.upsertJob(result.job);
           added++;
         } else {
-          failures.push({ input: result.input, message: errorMessage(result.error.code) });
+          failures.set(result.input, errorMessage(result.error.code));
         }
       }
-      if (added) store.toast(t('add.added', { count: added }), 'success');
 
-      if (!failures.length) {
+      if (!failures.size) {
+        store.toast(t('add.added', { count: added }), 'success');
         this.sheet.close();
         return;
       }
-      // Keep only what failed, so that it can be fixed and sent again.
-      const failed = new Set(failures.map((failure) => failure.input));
+      // Only what failed stays, with the reason, to be removed or sent again.
       this.text = magnets
-        .filter((magnet) => failed.has(magnet.uri))
+        .filter((magnet) => failures.has(magnet.uri))
         .map((magnet) => magnet.uri)
         .join('\n');
-      this.torrents = this.torrents.filter((torrent) => failed.has(torrent.file.name));
+      this.torrents = this.torrents.filter((torrent) => failures.has(torrent.file.name));
       this.failures = failures;
+      this.addedCount = added;
     } catch (error) {
-      store.toast(errorMessage(error instanceof ApiError ? error.info.code : 'internal'), 'error');
+      this.error = errorMessage(error instanceof ApiError ? error.info.code : 'internal');
     } finally {
       this.busy = false;
     }
   }
 
+  /** The request error, or how many items were refused (their reason shows on their row). */
+  private sheetError(magnets: MagnetInfo[]): string {
+    if (this.error) return this.error;
+    const failed =
+      magnets.filter((magnet) => this.failures.has(magnet.uri)).length +
+      this.torrents.filter((torrent) => this.failures.has(torrent.file.name)).length;
+    if (!failed) return '';
+    const failedText = t('add.failed', { count: failed });
+    return this.addedCount
+      ? `${failedText} ${t('add.othersAdded', { count: this.addedCount })}`
+      : failedText;
+  }
+
   override render() {
-    const { magnets, invalid } = extractMagnets(this.text);
+    const { magnets } = extractMagnets(this.text);
+    const unrecognized = unrecognizedLines(this.text);
     const count = magnets.length + this.torrents.length;
     const provider = this.selectedProvider;
     const category = this.selectedCategory;
+    const warnings = [
+      ...(unrecognized ? [t('add.invalid', { count: unrecognized })] : []),
+      ...this.rejectedFiles.map((name) => t('add.notTorrent', { name })),
+    ];
 
     return html`
       <dds-sheet
@@ -257,6 +321,7 @@ export class DdsAddSheet extends LitElement {
         primaryLabel=${count > 1 ? t('add.submitCount', { count }) : t('add.submit')}
         ?primaryDisabled=${!count || !provider || !category}
         ?busy=${this.busy}
+        .error=${this.sheetError(magnets)}
         @dds-primary=${this.submit}
       >
         ${this.configured ? nothing : this.renderNotConfigured()}
@@ -275,6 +340,7 @@ export class DdsAddSheet extends LitElement {
               @input=${(event: InputEvent) => {
                 this.text = (event.target as HTMLTextAreaElement).value;
               }}
+              @keydown=${this.onTextKeyDown}
             ></textarea>
             <div class="toolbar">
               ${
@@ -290,9 +356,9 @@ export class DdsAddSheet extends LitElement {
             </div>
           </div>
           ${
-            invalid.length
-              ? html`<div class="section-footer warning-text">
-                  ${t('add.invalid', { count: invalid.length })}
+            warnings.length
+              ? html`<div class="section-footer warnings" role="status">
+                  ${warnings.map((warning) => html`<p>${breakable(warning)}</p>`)}
                 </div>`
               : nothing
           }
@@ -307,65 +373,75 @@ export class DdsAddSheet extends LitElement {
 
         ${count ? this.renderItems(magnets) : nothing}
         ${this.configured ? this.renderChoices(provider, category) : nothing}
-        ${this.failures.length ? this.renderFailures() : nothing}
       </dds-sheet>
     `;
   }
 
   private renderNotConfigured() {
+    const admin = store.session?.user.isAdmin ?? false;
     return html`<div class="section">
       <div class="notice neutral">
         <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
-        <span>${t('add.notConfigured')}</span>
+        <div class="notice-text">
+          <p>${admin ? t('add.notConfigured') : t('add.notConfiguredUser')}</p>
+          ${
+            admin
+              ? html`<a href="#/settings" @click=${() => this.sheet.close()}>${t('setup.open')}</a>`
+              : nothing
+          }
+        </div>
       </div>
+    </div>`;
+  }
+
+  private renderItem(
+    icon: string,
+    name: string,
+    detail: unknown,
+    failure: string | undefined,
+    remove: () => void,
+  ) {
+    return html`<div class="row item">
+      <span class="row-icon"><dds-icon .path=${icon}></dds-icon></span>
+      <span class="row-main">
+        <span class="row-title item-name">${breakable(name)}</span>
+        ${
+          failure
+            ? html`<span class="row-subtitle failure">${failure}</span>`
+            : detail
+              ? html`<span class="row-subtitle">${detail}</span>`
+              : nothing
+        }
+      </span>
+      <button class="icon-btn remove" aria-label=${t('add.remove')} @click=${remove}>
+        <dds-icon .path=${mdiClose}></dds-icon>
+      </button>
     </div>`;
   }
 
   private renderItems(magnets: MagnetInfo[]) {
     return html`<section class="section">
-      <div class="group with-icons items">
-        ${magnets.map(
-          (magnet) =>
-            html`<div class="row">
-              <span class="row-icon"><dds-icon .path=${mdiLinkVariant}></dds-icon></span>
-              <span class="row-main">
-                <span class="row-title ellipsis">${magnet.name ?? t('add.unnamed')}</span>
-                ${
-                  magnet.hash
-                    ? html`<span class="row-subtitle mono">${shortHash(magnet.hash)}</span>`
-                    : nothing
-                }
-              </span>
-              <button
-                class="icon-btn remove"
-                aria-label=${t('add.remove')}
-                @click=${() => this.removeMagnet(magnet)}
-              >
-                <dds-icon .path=${mdiClose}></dds-icon>
-              </button>
-            </div>`,
+      <div class="group with-icons">
+        ${magnets.map((magnet) =>
+          this.renderItem(
+            mdiLinkVariant,
+            magnet.name ?? t('add.unnamed'),
+            magnet.hash ? html`<span class="mono">${shortHash(magnet.hash)}</span>` : null,
+            this.failures.get(magnet.uri),
+            () => this.removeMagnet(magnet),
+          ),
         )}
-        ${this.torrents.map(
-          (torrent) =>
-            html`<div class="row">
-              <span class="row-icon"><dds-icon .path=${mdiFileDocumentOutline}></dds-icon></span>
-              <span class="row-main">
-                <span class="row-title ellipsis">${torrent.name}</span>
-                <span class="row-subtitle num"
-                  >${formatBytes(torrent.size)} ·
-                  ${t('downloads.fileCount', { count: torrent.fileCount })}</span
-                >
-              </span>
-              <button
-                class="icon-btn remove"
-                aria-label=${t('add.remove')}
-                @click=${() => {
-                  this.torrents = this.torrents.filter((item) => item.id !== torrent.id);
-                }}
-              >
-                <dds-icon .path=${mdiClose}></dds-icon>
-              </button>
-            </div>`,
+        ${this.torrents.map((torrent) =>
+          this.renderItem(
+            mdiFileDocumentOutline,
+            torrent.name,
+            html`<span class="num"
+              >${formatBytes(torrent.size)} ·
+              ${t('downloads.fileCount', { count: torrent.fileCount })}</span
+            >`,
+            this.failures.get(torrent.file.name),
+            () => this.removeTorrent(torrent),
+          ),
         )}
       </div>
     </section>`;
@@ -378,26 +454,24 @@ export class DdsAddSheet extends LitElement {
       <section class="section">
         <div class="section-header">${t('add.destination')}</div>
         <div class="group with-icons" role="radiogroup" aria-label=${t('add.destination')}>
-          ${categories.map(
-            (item) =>
-              html`<button
-                class="row"
-                role="radio"
-                aria-checked=${item.id === category?.id}
-                @click=${() => this.selectCategory(item.id)}
-              >
-                <span class="row-icon"><dds-icon .path=${categoryIcon(item.icon)}></dds-icon></span>
-                <span class="row-main">
-                  <span class="row-title">${item.name}</span>
-                  <span class="row-subtitle ellipsis">${item.destination}</span>
-                </span>
-                ${
-                  item.id === category?.id
-                    ? html`<dds-icon class="check" .path=${mdiCheck}></dds-icon>`
-                    : nothing
-                }
-              </button>`,
-          )}
+          ${categories.map((item, index) => {
+            const checked = item.id === category?.id;
+            return html`<button
+              class="row"
+              role="radio"
+              aria-checked=${checked ? 'true' : 'false'}
+              tabindex=${checked ? 0 : -1}
+              @click=${() => this.selectCategory(item.id)}
+              @keydown=${(event: KeyboardEvent) => this.onChoiceKeyDown(event, index)}
+            >
+              <span class="row-icon"><dds-icon .path=${categoryIcon(item.icon)}></dds-icon></span>
+              <span class="row-main">
+                <span class="row-title">${item.name}</span>
+                <span class="row-subtitle ellipsis">${item.destination}</span>
+              </span>
+              ${checked ? html`<dds-icon class="check" .path=${mdiCheck}></dds-icon>` : nothing}
+            </button>`;
+          })}
         </div>
       </section>
 
@@ -422,24 +496,6 @@ export class DdsAddSheet extends LitElement {
     `;
   }
 
-  private renderFailures() {
-    return html`<div class="section">
-      <div class="notice" role="alert">
-        <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
-        <div>
-          <strong>${t('add.failed', { count: this.failures.length })}</strong>
-          ${this.failures.map(
-            (failure) =>
-              html`<div class="failure">
-                <span class="ellipsis">${failure.input}</span>
-                <span>${failure.message}</span>
-              </div>`,
-          )}
-        </div>
-      </div>
-    </div>`;
-  }
-
   static override styles = [
     sharedStyles,
     css`
@@ -455,8 +511,11 @@ export class DdsAddSheet extends LitElement {
         transition: box-shadow 0.15s ease;
       }
 
-      .input-group:focus-within {
-        box-shadow: var(--focus-ring);
+      /* Keyboard and mouse: the group shows where typing goes (touch screens show the keyboard). */
+      @media (pointer: fine) {
+        .input-group:focus-within {
+          box-shadow: var(--focus-ring);
+        }
       }
 
       textarea {
@@ -485,10 +544,6 @@ export class DdsAddSheet extends LitElement {
         box-shadow: none;
       }
 
-      .section-footer.warning-text {
-        color: var(--warning);
-      }
-
       @media (pointer: fine) {
         textarea {
           font-size: 15px;
@@ -514,13 +569,27 @@ export class DdsAddSheet extends LitElement {
         transform: scaleY(0.5);
       }
 
-      .items .row {
-        padding-right: 8px;
+      .warnings {
+        display: grid;
+        gap: 2px;
+        color: var(--warning);
       }
 
-      .remove {
-        width: 32px;
-        height: 32px;
+      .item {
+        padding-right: 4px;
+      }
+
+      /* Long release names wrap at dots, on two lines at most. */
+      .item-name {
+        display: -webkit-box;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+
+      .item .failure {
+        color: var(--danger);
       }
 
       .remove dds-icon {
@@ -532,16 +601,15 @@ export class DdsAddSheet extends LitElement {
         background: var(--bg-elevated);
       }
 
-      .failure {
-        display: flex;
-        gap: 6px;
+      .notice-text {
+        display: grid;
+        gap: 4px;
         min-width: 0;
-        margin-top: 4px;
-        color: var(--text-secondary);
       }
 
-      .failure .ellipsis {
-        max-width: 55%;
+      .notice-text a {
+        justify-self: start;
+        font-weight: 600;
       }
     `,
   ];

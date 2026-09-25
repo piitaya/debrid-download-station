@@ -101,6 +101,8 @@ async function login(page: Page): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
+  // No hover highlight left where the last click happened.
+  await page.mouse.move(0, 0);
   await sleep(500);
   await page.screenshot({ path: join(OUT, `${name}.png`) });
   console.log(`✓ ${name}.png`);
