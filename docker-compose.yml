@@ -1,0 +1,26 @@
+# Debrid Download Station — example for Synology Container Manager (Project) or docker compose.
+services:
+  debrid-download-station:
+    image: ghcr.io/piitaya/debrid-download-station:latest
+    container_name: debrid-download-station
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    environment:
+      # DSM address as seen from the container (HTTP 5000, or HTTPS 5001).
+      SYNOLOGY_URL: http://192.168.1.10:5000
+      # Uncomment when using HTTPS with DSM's self-signed certificate.
+      # SYNOLOGY_INSECURE_TLS: 'true'
+      TZ: Europe/Paris
+      # Owner of the files in ./data: the id of your DSM user (run `id` over SSH).
+      PUID: 1026
+      PGID: 100
+      # Optional: debrid API keys (they can also be entered in the Settings page).
+      # ALLDEBRID_API_KEY: ''
+      # REALDEBRID_API_KEY: ''
+      # TORBOX_API_KEY: ''
+      # Optional: DSM accounts allowed to log in, and to change the settings.
+      # ALLOWED_USERS: paul,marie
+      # ADMIN_USERS: paul
+    volumes:
+      - ./data:/data

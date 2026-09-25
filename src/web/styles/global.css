@@ -1,0 +1,106 @@
+:root {
+  color-scheme: light dark;
+  --font:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --bg: #f3f3f8;
+  --glow-1: rgba(99, 102, 241, 0.2);
+  --glow-2: rgba(217, 70, 239, 0.12);
+  --surface: #ffffff;
+  --surface-2: #f0f0f6;
+  --surface-3: #e6e6ef;
+  --header-bg: rgba(243, 243, 248, 0.72);
+  --border: rgba(20, 20, 50, 0.08);
+  --text: #15151c;
+  --text-2: #5d5d6c;
+  --text-3: #92929f;
+
+  --accent: #5a5ff0;
+  --accent-strong: #4a4fe0;
+  --accent-soft: rgba(90, 95, 240, 0.1);
+  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #d946ef 100%);
+  --on-accent: #ffffff;
+
+  --success: #16a34a;
+  --success-soft: rgba(22, 163, 74, 0.12);
+  --warning: #c26a06;
+  --warning-soft: rgba(217, 119, 6, 0.14);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.1);
+
+  --shadow: 0 1px 2px rgba(20, 20, 50, 0.04), 0 10px 30px -8px rgba(20, 20, 50, 0.1);
+  --shadow-lg: 0 24px 60px -12px rgba(20, 20, 50, 0.28);
+  --radius-lg: 22px;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --backdrop: rgba(10, 10, 20, 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b11;
+    --glow-1: rgba(99, 102, 241, 0.22);
+    --glow-2: rgba(217, 70, 239, 0.1);
+    --surface: #16161f;
+    --surface-2: #1f1f2b;
+    --surface-3: #2a2a38;
+    --header-bg: rgba(11, 11, 17, 0.72);
+    --border: rgba(255, 255, 255, 0.08);
+    --text: #f3f3f8;
+    --text-2: #a7a7b6;
+    --text-3: #6f6f80;
+
+    --accent: #8b8ff8;
+    --accent-strong: #a2a5fa;
+    --accent-soft: rgba(139, 143, 248, 0.16);
+
+    --success: #4ade80;
+    --success-soft: rgba(74, 222, 128, 0.14);
+    --warning: #fbbf24;
+    --warning-soft: rgba(251, 191, 36, 0.14);
+    --danger: #f87171;
+    --danger-soft: rgba(248, 113, 113, 0.14);
+
+    --shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --shadow-lg: 0 24px 60px -12px rgba(0, 0, 0, 0.7);
+    --backdrop: rgba(0, 0, 0, 0.55);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--text);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(900px 520px at 0% -10%, var(--glow-1), transparent 65%),
+    radial-gradient(800px 480px at 105% -5%, var(--glow-2), transparent 60%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+dds-app {
+  display: block;
+  min-height: 100vh;
+  min-height: 100dvh;
+}

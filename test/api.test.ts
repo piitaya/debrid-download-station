@@ -1,0 +1,243 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createApp } from '../src/server/app.js';
+import { createProvider, Providers } from '../src/server/debrid/index.js';
+import { loadEnv } from '../src/server/env.js';
+import { EventHub } from '../src/server/events.js';
+import { JobManager, type JobsFile } from '../src/server/jobs.js';
+import { SynologyClient } from '../src/server/nas/synology.js';
+import { RateLimiter } from '../src/server/rate-limit.js';
+import { Sessions, type SessionMap } from '../src/server/sessions.js';
+import { defaultSettings, Settings, type StoredSettings } from '../src/server/settings.js';
+import { JsonFile } from '../src/server/storage.js';
+import type { AddJobsResponse, AppSettings, JobView, SessionInfo } from '../src/shared/types.js';
+import { makeTorrent } from './helpers.js';
+import { createMockServer } from './mocks/server.js';
+import { listen } from './serve.js';
+
+const mock = createMockServer({ speed: 4 * 1024 * 1024 * 1024 });
+let server: Awaited<ReturnType<typeof listen>>;
+let app: ReturnType<typeof createApp>;
+let jobs: JobManager;
+
+beforeAll(async () => {
+  server = await listen(mock.app);
+  const dir = mkdtempSync(join(tmpdir(), 'dds-api-'));
+  const env = loadEnv({
+    SYNOLOGY_URL: server.url,
+    ALLDEBRID_API_URL: `${server.url}/alldebrid`,
+    REALDEBRID_API_URL: `${server.url}/realdebrid`,
+    TORBOX_API_URL: `${server.url}/torbox`,
+    TORBOX_API_KEY: 'from-env',
+    ALLOWED_USERS: 'paul,marie,secure',
+    DATA_DIR: dir,
+  });
+  const settings = new Settings(
+    new JsonFile<StoredSettings>(join(dir, 's.json'), defaultSettings),
+    env,
+  );
+  const sessions = new Sessions(
+    new JsonFile<SessionMap>(join(dir, 'x.json'), () => ({})),
+    86_400_000,
+  );
+  const events = new EventHub();
+  const providers = new Providers(settings, env);
+  const nas = new SynologyClient({ baseUrl: env.synologyUrl!, insecureTls: false });
+  jobs = new JobManager({
+    file: new JsonFile<JobsFile>(join(dir, 'j.json'), () => ({ jobs: [] })),
+    nas,
+    sessions,
+    events,
+    provider: (id) => providers.get(id),
+    options: () => ({ createSubfolder: settings.createSubfolder, deleteFromDebrid: false }),
+  });
+  app = createApp({
+    env,
+    settings,
+    sessions,
+    jobs,
+    events,
+    nas,
+    provider: (id) => providers.get(id),
+    providerWithKey: (id, key) => createProvider(id, key, env),
+    loginLimiter: new RateLimiter(5, 60_000),
+    globalLoginLimiter: new RateLimiter(20, 60_000),
+  });
+});
+afterAll(() => server.close());
+
+/** A tiny cookie-keeping client. */
+function client() {
+  const jar = new Map<string, string>();
+  return async (
+    method: string,
+    path: string,
+    body?: unknown,
+    headers: Record<string, string> = {},
+  ) => {
+    const init: RequestInit = {
+      method,
+      headers: {
+        'X-Requested-With': 'dds',
+        Cookie: [...jar].map(([k, v]) => `${k}=${v}`).join('; '),
+        ...(body !== undefined && !(body instanceof FormData)
+          ? { 'Content-Type': 'application/json' }
+          : {}),
+        ...headers,
+      },
+      body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+    };
+    const response = await app.request(`http://app.test/api/${path}`, init);
+    for (const cookie of response.headers.getSetCookie()) {
+      const [pair] = cookie.split(';');
+      const [name, ...value] = pair!.split('=');
+      jar.set(name!, value.join('='));
+    }
+    const text = await response.text();
+    return { status: response.status, data: text ? JSON.parse(text) : null, jar };
+  };
+}
+
+async function waitFor(check: () => boolean) {
+  for (let i = 0; i < 200 && !check(); i++) {
+    for (const job of jobs.list('paul')) job.nextCheckAt = 0;
+    await jobs.tick();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+}
+
+describe('HTTP API', () => {
+  it('requires a session and the anti-CSRF header', async () => {
+    const api = client();
+    expect((await api('GET', 'session')).status).toBe(401);
+    expect((await api('GET', 'health')).data).toMatchObject({ status: 'ok' });
+    const noHeader = await app.request('http://app.test/api/login', {
+      method: 'POST',
+      body: JSON.stringify({ username: 'paul', password: 'paul' }),
+    });
+    expect(noHeader.status).toBe(403);
+  });
+
+  it('logs in with the DSM account', async () => {
+    const api = client();
+    const wrong = await api('POST', 'login', { username: 'paul', password: 'nope' });
+    expect(wrong).toMatchObject({ status: 401, data: { error: { code: 'invalid_credentials' } } });
+
+    const notAllowed = await api('POST', 'login', { username: 'admin', password: 'admin' });
+    expect(notAllowed).toMatchObject({ status: 403, data: { error: { code: 'not_allowed' } } });
+
+    const ok = await api('POST', 'login', { username: 'Paul', password: 'paul' });
+    expect(ok.status).toBe(200);
+    expect((ok.data as SessionInfo).user).toEqual({ username: 'paul', isAdmin: true });
+    expect((await api('GET', 'session')).status).toBe(200);
+
+    await api('POST', 'logout');
+    expect((await api('GET', 'session')).status).toBe(401);
+  });
+
+  it('asks for the 2FA code once per device', async () => {
+    const api = client();
+    const first = await api('POST', 'login', { username: 'secure', password: 'secure' });
+    expect(first.data.error.code).toBe('otp_required');
+    const withCode = await api('POST', 'login', {
+      username: 'secure',
+      password: 'secure',
+      otp: '123 456',
+    });
+    expect(withCode.status).toBe(200);
+    expect(withCode.jar.get('dds_device')).toBeTruthy();
+    await api('POST', 'logout');
+    // Remembered device: no code needed any more.
+    expect((await api('POST', 'login', { username: 'secure', password: 'secure' })).status).toBe(
+      200,
+    );
+  });
+
+  it('keeps settings to DSM administrators', async () => {
+    const marie = client();
+    await marie('POST', 'login', { username: 'marie', password: 'marie' });
+    expect((await marie('GET', 'session')).data.user.isAdmin).toBe(false);
+    expect((await marie('GET', 'settings')).status).toBe(200);
+    expect((await marie('PUT', 'settings', { createSubfolder: false })).status).toBe(403);
+    expect((await marie('GET', 'folders')).status).toBe(403);
+  });
+
+  it('takes a magnet and a .torrent file to Download Station', async () => {
+    const api = client();
+    await api('POST', 'login', { username: 'paul', password: 'paul' });
+
+    // Settings: an API key, a category picked from the NAS folders.
+    const shares = await api('GET', 'folders');
+    expect(shares.data.folders.map((f: { name: string }) => f.name)).toContain('video');
+    const sub = await api('GET', `folders?path=${encodeURIComponent('video')}`);
+    expect(sub.data.folders).toContainEqual({ name: 'Séries', path: 'video/Séries' });
+    const test = await api('POST', 'providers/alldebrid/test', { apiKey: 'new-key' });
+    expect(test.data.username).toBe('demo-alldebrid');
+    const saved = await api('PUT', 'settings', {
+      apiKeys: { alldebrid: 'new-key', torbox: 'ignored' },
+      categories: [
+        { name: 'Séries', icon: 'tv', destination: '/video/Séries/' },
+        { name: 'Films', icon: 'movie', destination: 'video/Films' },
+      ],
+    });
+    const settings = saved.data as AppSettings;
+    expect(settings.categories.map((c) => c.destination)).toEqual(['video/Séries', 'video/Films']);
+    expect(settings.providers.find((p) => p.id === 'torbox')).toEqual({
+      id: 'torbox',
+      configured: true,
+      fromEnv: true,
+    });
+    const [series, films] = settings.categories;
+
+    const added = await api('POST', 'jobs', {
+      magnets: ['magnet:?xt=urn:btih:' + '1'.repeat(40) + '&dn=Sintel.S01.1080p.WEB\nnot-a-magnet'],
+      provider: 'alldebrid',
+      categoryId: series!.id,
+    });
+    const results = (added.data as AddJobsResponse).results;
+    expect(results.map((r) => r.ok)).toEqual([false, true]);
+    expect(results[0]).toMatchObject({ input: 'not-a-magnet', error: { code: 'magnet_invalid' } });
+
+    const form = new FormData();
+    form.set('provider', 'torbox');
+    form.set('categoryId', films!.id);
+    form.append('torrents', new Blob([makeTorrent('Big.Buck.Bunny.mkv')]), 'bbb.torrent');
+    form.append('torrents', new Blob(['not a torrent']), 'oops.torrent');
+    const upload = (await api('POST', 'jobs', form)).data as AddJobsResponse;
+    expect(upload.results.map((r) => r.ok)).toEqual([true, false]);
+
+    await waitFor(() => jobs.list('paul').every((job) => job.status === 'completed'));
+    const list = (await api('GET', 'jobs')).data.jobs as JobView[];
+    const pack = list.find((job) => job.name.startsWith('Sintel'))!;
+    const movie = list.find((job) => job.name.startsWith('Big.Buck'))!;
+    expect(pack).toMatchObject({
+      status: 'completed',
+      destination: 'video/Séries/Sintel.S01.1080p.WEB',
+      progress: 1,
+    });
+    expect(pack.files).toHaveLength(5);
+    expect(movie).toMatchObject({ status: 'completed', destination: 'video/Films' });
+
+    // TorBox links carry no file name: the file was renamed on the NAS.
+    expect(mock.dsm.state.renamed).toEqual([
+      expect.stringMatching(/^\/video\/Films\/[0-9a-f]{32} -> Big\.Buck\.Bunny\.mkv$/),
+    ]);
+
+    expect((await api('POST', 'jobs/clear')).status).toBe(204);
+    expect((await api('GET', 'jobs')).data.jobs).toEqual([]);
+  });
+
+  it('asks to log in again when DSM drops the session', async () => {
+    const api = client();
+    await api('POST', 'login', { username: 'paul', password: 'paul' });
+    mock.dsm.expireSessions();
+    const folders = await api('GET', 'folders');
+    expect(folders).toMatchObject({
+      status: 401,
+      data: { error: { code: 'nas_session_expired' } },
+    });
+    expect((await api('GET', 'settings')).data.error.code).toBe('nas_session_expired');
+  });
+});
