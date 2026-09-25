@@ -71,6 +71,10 @@ const errorCode = (error: unknown): ErrorCode =>
 const byName = (a: FolderEntry, b: FolderEntry) =>
   a.name.localeCompare(b.name, locale, { numeric: true, sensitivity: 'base' });
 
+/** `video/Films` → `video`, `video` → null (the shared folders). */
+const parentPath = (path: string): string | null =>
+  path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null;
+
 /**
  * Browses the NAS folders. Fires `dds-pick` (`CustomEvent<string>`, a Download Station path such
  * as `video/Films`) when a folder is chosen.
@@ -103,7 +107,8 @@ export class DdsFolderPicker extends LitElement {
     await this.sheet.show();
   }
 
-  private async load(path: string | null, fallBackToShares = false): Promise<void> {
+  /** With `fallBack`, a folder that cannot be listed opens the closest one above it. */
+  private async load(path: string | null, fallBack = false): Promise<void> {
     const run = ++this.loadRun;
     this.path = path;
     this.folders = [];
@@ -115,12 +120,19 @@ export class DdsFolderPicker extends LitElement {
     try {
       const listing = await api.folders(path ?? undefined);
       if (run !== this.loadRun) return;
+      if (!listing.exists) {
+        // Opened on a folder that does not exist yet: starts from the closest one that does.
+        if (fallBack && path !== null) return this.load(parentPath(path), true);
+        this.error = 'destination_missing';
+        this.loading = false;
+        return;
+      }
       this.path = listing.path;
       this.folders = [...listing.folders].sort(byName);
       this.loading = false;
     } catch (error) {
       if (run !== this.loadRun) return;
-      if (fallBackToShares) return this.load(null);
+      if (fallBack && path !== null) return this.load(null);
       this.error = errorCode(error);
       this.loading = false;
     }

@@ -5,9 +5,9 @@ import type {
   FolderEntry,
   FolderListing,
   JobView,
-  ProviderAccount,
   ProviderId,
-  SessionInfo,
+  ProviderTestResult,
+  SessionStatus,
   SettingsUpdate,
 } from '../shared/types.js';
 
@@ -61,15 +61,15 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  session: () => request<SessionInfo>('GET', 'session'),
+  session: () => request<SessionStatus>('GET', 'session'),
   login: (body: { username: string; password: string; otp?: string }) =>
-    request<SessionInfo>('POST', 'login', body),
+    request<SessionStatus>('POST', 'login', body),
   logout: () => request<void>('POST', 'logout'),
 
   settings: () => request<AppSettings>('GET', 'settings'),
   updateSettings: (patch: SettingsUpdate) => request<AppSettings>('PUT', 'settings', patch),
   testProvider: (id: ProviderId, apiKey?: string) =>
-    request<ProviderAccount>('POST', `providers/${id}/test`, { apiKey }),
+    request<ProviderTestResult>('POST', `providers/${id}/test`, { apiKey }),
 
   folders: (path?: string) =>
     request<FolderListing>('GET', path ? `folders?path=${encodeURIComponent(path)}` : 'folders'),

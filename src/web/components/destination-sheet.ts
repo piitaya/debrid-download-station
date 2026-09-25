@@ -86,7 +86,8 @@ export class DdsDestinationSheet extends LitElement {
 
   /**
    * Checks that the folder exists, since a mistyped one would only show up at the first download.
-   * False when it does not: the error says so and the next press creates it.
+   * False when it does not: the error says so and, below a shared folder, the next press creates
+   * it.
    */
   private async checkFolder(path: string): Promise<boolean> {
     if (this.missingFolder === path) {
@@ -94,20 +95,21 @@ export class DdsDestinationSheet extends LitElement {
       await api.createFolder(path.slice(0, slash), path.slice(slash + 1));
       return true;
     }
-    try {
-      await api.folders(path);
-      return true;
-    } catch (error) {
-      // Not checked (no access to File Station…): saved as typed.
-      if (errorCode(error) !== 'destination_missing') return true;
-      // A shared folder cannot be created from here.
-      if (!path.includes('/')) {
-        this.error = t('destination.shareMissing');
-        return false;
-      }
-      this.missingFolder = path;
+    // Not checked when the NAS cannot tell (no access to File Station…): saved as typed.
+    const listing = await api.folders(path).catch(() => null);
+    if (!listing || listing.exists) return true;
+
+    // Shared folders cannot be created from here: a mistyped one is pointed out.
+    const share = path.split('/')[0]!;
+    const shares = await api.folders().catch(() => null);
+    const shareExists =
+      !shares || shares.folders.some((item) => item.name.toLowerCase() === share.toLowerCase());
+    if (!path.includes('/') || !shareExists) {
+      this.error = t('destination.shareMissing', { name: share });
       return false;
     }
+    this.missingFolder = path;
+    return false;
   }
 
   private async save(): Promise<void> {

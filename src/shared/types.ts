@@ -71,12 +71,27 @@ export interface SessionInfo {
   version: string;
 }
 
+/**
+ * Answer of GET /api/session and POST /api/login. Being signed out, or asked for the 2FA code,
+ * is an answer and not an error: the browser does not report it as a failed request.
+ */
+export interface SessionStatus {
+  /** Null when signed out, or while the login waits for the 2FA code. */
+  session: SessionInfo | null;
+  /** Why there is no session: it ended, or the login needs the 2FA code. */
+  reason?: 'unauthorized' | 'nas_session_expired' | 'otp_required';
+}
+
 export interface ProviderAccount {
   username: string;
   premium: boolean;
   /** Epoch milliseconds, when known. */
   premiumUntil: number | null;
 }
+
+/** Answer of POST /api/providers/:id/test: a refused key is an answer, not an error. */
+export type ProviderTestResult =
+  { ok: true; account: ProviderAccount } | { ok: false; error: ErrorInfo };
 
 export interface FolderEntry {
   name: string;
@@ -87,6 +102,8 @@ export interface FolderEntry {
 export interface FolderListing {
   /** Listed folder, or null for the list of shared folders. */
   path: string | null;
+  /** False when the folder does not exist on the NAS (then it has no subfolders). */
+  exists: boolean;
   folders: FolderEntry[];
 }
 

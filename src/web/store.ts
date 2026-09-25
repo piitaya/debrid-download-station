@@ -41,8 +41,10 @@ class Store extends EventTarget {
 
   async init(): Promise<void> {
     try {
-      this.session = await api.session();
-      await this.afterLogin();
+      const status = await api.session();
+      this.session = status.session;
+      if (status.session) await this.afterLogin();
+      else this.logoutReason = status.reason ?? null;
     } catch (error) {
       this.session = null;
       if (!(error instanceof ApiError && error.status === 401)) {
@@ -52,18 +54,21 @@ class Store extends EventTarget {
         setTimeout(() => void this.init(), 3000);
         return;
       }
-      if (error.info.code === 'nas_session_expired') this.logoutReason = 'nas_session_expired';
     }
     this.ready = true;
     this.online = true;
     this.changed();
   }
 
-  async login(username: string, password: string, otp?: string): Promise<void> {
-    this.session = await api.login({ username, password, otp });
+  /** Signs in. Resolves to false when the 2FA code is needed. */
+  async login(username: string, password: string, otp?: string): Promise<boolean> {
+    const status = await api.login({ username, password, otp });
+    if (!status.session) return false;
+    this.session = status.session;
     this.logoutReason = null;
     await this.afterLogin();
     this.changed();
+    return true;
   }
 
   async logout(): Promise<void> {
@@ -98,11 +103,11 @@ class Store extends EventTarget {
     this.checkingAccess = true;
     api
       .session()
-      .catch((error: unknown) => {
-        if (!(error instanceof ApiError) || error.status !== 401) return;
-        // Tells the app session from the NAS session, for the message on the login screen.
-        this.reset(error.info.code === 'nas_session_expired' ? error.info.code : 'unauthorized');
+      .then((status) => {
+        // The reason (app or NAS session) picks the message on the login screen.
+        if (!status.session) this.reset(status.reason ?? 'unauthorized');
       })
+      .catch(() => undefined)
       .finally(() => {
         this.checkingAccess = false;
       });
@@ -112,8 +117,12 @@ class Store extends EventTarget {
   private resume(): void {
     this.checkingSession ??= api
       .session()
-      .then((session) => {
-        this.session = session;
+      .then((status) => {
+        if (!status.session) {
+          this.reset(status.reason ?? 'unauthorized');
+          return;
+        }
+        this.session = status.session;
         if (!this.events || this.events.readyState === EventSource.CLOSED) this.connectEvents();
       })
       .catch(() => undefined)

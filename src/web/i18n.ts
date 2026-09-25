@@ -161,7 +161,7 @@ const fr = {
   'destination.saved': 'Destination enregistrée',
   'destination.deleted': 'Destination supprimée',
   'destination.folderMissing': 'Ce dossier n’existe pas encore sur le NAS.',
-  'destination.shareMissing': 'Ce dossier partagé n’existe pas sur le NAS.',
+  'destination.shareMissing': 'Le dossier partagé « {name} » n’existe pas sur le NAS.',
   'destination.createAndSave': 'Créer le dossier et enregistrer',
 
   'picker.title': 'Choisir un dossier',
@@ -395,7 +395,7 @@ const en: Record<MessageKey, string> = {
   'destination.saved': 'Destination saved',
   'destination.deleted': 'Destination deleted',
   'destination.folderMissing': 'This folder does not exist on the NAS yet.',
-  'destination.shareMissing': 'This shared folder does not exist on the NAS.',
+  'destination.shareMissing': 'The shared folder “{name}” does not exist on the NAS.',
   'destination.createAndSave': 'Create folder and save',
 
   'picker.title': 'Choose a folder',

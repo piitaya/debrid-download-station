@@ -45,7 +45,10 @@ export const errorInfo = (error: unknown): ErrorInfo =>
 /** Checks the saved API key of a provider, or the given one. */
 export async function checkProvider(id: ProviderId, apiKey?: string): Promise<ProviderCheck> {
   try {
-    return { status: 'ok', account: await api.testProvider(id, apiKey) };
+    const result = await api.testProvider(id, apiKey);
+    return result.ok
+      ? { status: 'ok', account: result.account }
+      : { status: 'error', error: result.error };
   } catch (error) {
     return { status: 'error', error: errorInfo(error) };
   }

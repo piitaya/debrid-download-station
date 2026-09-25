@@ -12,7 +12,7 @@ import { RateLimiter } from '../src/server/rate-limit.js';
 import { Sessions, type SessionMap } from '../src/server/sessions.js';
 import { defaultSettings, Settings, type StoredSettings } from '../src/server/settings.js';
 import { JsonFile } from '../src/server/storage.js';
-import type { AddJobsResponse, AppSettings, JobView, SessionInfo } from '../src/shared/types.js';
+import type { AddJobsResponse, AppSettings, JobView, SessionStatus } from '../src/shared/types.js';
 import { makeTorrent } from './helpers.js';
 import { createMockServer } from './mocks/server.js';
 import { listen } from './serve.js';
@@ -111,7 +111,9 @@ async function waitFor(check: () => boolean) {
 describe('HTTP API', () => {
   it('requires a session and the anti-CSRF header', async () => {
     const api = client();
-    expect((await api('GET', 'session')).status).toBe(401);
+    // Being signed out is an answer (not a failed request in the browser).
+    expect(await api('GET', 'session')).toMatchObject({ status: 200, data: { session: null } });
+    expect((await api('GET', 'settings')).status).toBe(401);
     expect((await api('GET', 'health')).data).toMatchObject({ status: 'ok' });
     const noHeader = await app.request('http://app.test/api/login', {
       method: 'POST',
@@ -130,17 +132,26 @@ describe('HTTP API', () => {
 
     const ok = await api('POST', 'login', { username: 'Paul', password: 'paul' });
     expect(ok.status).toBe(200);
-    expect((ok.data as SessionInfo).user).toEqual({ username: 'paul', isAdmin: true });
-    expect((await api('GET', 'session')).status).toBe(200);
+    expect((ok.data as SessionStatus).session?.user).toEqual({ username: 'paul', isAdmin: true });
+    expect((await api('GET', 'session')).data.session.user.username).toBe('paul');
 
     await api('POST', 'logout');
-    expect((await api('GET', 'session')).status).toBe(401);
+    expect((await api('GET', 'session')).data).toEqual({ session: null });
+  });
+
+  it('says when a session is over, once', async () => {
+    const api = client();
+    const ended = await api('GET', 'session', undefined, { Cookie: 'dds_session=forgotten' });
+    expect(ended.data).toEqual({ session: null, reason: 'unauthorized' });
+    // The cookie is cleared: the next visit is a plain signed-out one.
+    expect(ended.jar.get('dds_session')).toBe('');
   });
 
   it('asks for the 2FA code once per device', async () => {
     const api = client();
     const first = await api('POST', 'login', { username: 'secure', password: 'secure' });
-    expect(first.data.error.code).toBe('otp_required');
+    // The code is the next step, not a failed attempt.
+    expect(first).toMatchObject({ status: 200, data: { session: null, reason: 'otp_required' } });
     const withCode = await api('POST', 'login', {
       username: 'secure',
       password: 'secure',
@@ -158,7 +169,7 @@ describe('HTTP API', () => {
   it('keeps settings to DSM administrators', async () => {
     const marie = client();
     await marie('POST', 'login', { username: 'marie', password: 'marie' });
-    expect((await marie('GET', 'session')).data.user.isAdmin).toBe(false);
+    expect((await marie('GET', 'session')).data.session.user.isAdmin).toBe(false);
     expect((await marie('GET', 'settings')).status).toBe(200);
     expect((await marie('PUT', 'settings', { createSubfolder: false })).status).toBe(403);
     expect((await marie('GET', 'folders')).status).toBe(403);
@@ -172,15 +183,22 @@ describe('HTTP API', () => {
     const shares = await api('GET', 'folders');
     expect(shares.data.folders.map((f: { name: string }) => f.name)).toContain('video');
     const sub = await api('GET', `folders?path=${encodeURIComponent('video')}`);
+    expect(sub.data.exists).toBe(true);
     expect(sub.data.folders).toContainEqual({ name: 'Séries', path: 'video/Séries' });
-    // A mistyped folder is told apart, so that the app can offer to create it.
+    // A folder that does not exist is an answer, so that the app can offer to create it.
     const missing = await api('GET', `folders?path=${encodeURIComponent('video/Filmz')}`);
     expect(missing).toMatchObject({
-      status: 404,
-      data: { error: { code: 'destination_missing' } },
+      status: 200,
+      data: { path: 'video/Filmz', exists: false, folders: [] },
     });
     const test = await api('POST', 'providers/alldebrid/test', { apiKey: 'new-key' });
-    expect(test.data.username).toBe('demo-alldebrid');
+    expect(test.data).toMatchObject({ ok: true, account: { username: 'demo-alldebrid' } });
+    // So is a refused key.
+    const refused = await api('POST', 'providers/alldebrid/test', { apiKey: 'bad' });
+    expect(refused).toMatchObject({
+      status: 200,
+      data: { ok: false, error: { code: 'provider_auth' } },
+    });
     const saved = await api('PUT', 'settings', {
       apiKeys: { alldebrid: 'new-key', torbox: 'ignored' },
       categories: [
@@ -245,5 +263,9 @@ describe('HTTP API', () => {
       data: { error: { code: 'nas_session_expired' } },
     });
     expect((await api('GET', 'settings')).data.error.code).toBe('nas_session_expired');
+    expect((await api('GET', 'session')).data).toEqual({
+      session: null,
+      reason: 'nas_session_expired',
+    });
   });
 });

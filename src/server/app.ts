@@ -17,7 +17,9 @@ import {
   type ErrorCode,
   type FolderListing,
   type ProviderId,
+  type ProviderTestResult,
   type SessionInfo,
+  type SessionStatus,
 } from '../shared/types.js';
 import type { DebridProvider } from './debrid/types.js';
 import type { Env } from './env.js';
@@ -75,7 +77,6 @@ const STATUS_BY_CODE: Partial<Record<ErrorCode, ContentfulStatusCode>> = {
   torrent_invalid: 400,
   category_missing: 400,
   provider_not_configured: 400,
-  destination_missing: 404,
   nas_not_configured: 503,
   nas_unreachable: 502,
   provider_unreachable: 502,
@@ -227,6 +228,10 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
         deviceId,
       });
     } catch (error) {
+      if (error instanceof AppError && error.code === 'otp_required') {
+        // The password is right: the code is the next step, not a failed attempt.
+        return c.json({ session: null, reason: 'otp_required' } satisfies SessionStatus);
+      }
       if (
         error instanceof AppError &&
         ['invalid_credentials', 'otp_invalid'].includes(error.code)
@@ -263,23 +268,37 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     }
     jobs.resumeFor(username);
     log.info(`User "${username}" logged in`);
-    return c.json(sessionInfo(session));
+    return c.json({ session: sessionInfo(session) } satisfies SessionStatus);
   });
 
-  api.get('/session', requireSession, async (c) => {
-    const session = c.get('session');
-    const token = c.get('token');
+  // Being signed out is an answer, not an error (see SessionStatus).
+  api.get('/session', async (c) => {
+    const token = getCookie(c, SESSION_COOKIE);
+    const session = sessions.get(token);
+    if (!token || !session) {
+      if (!token) return c.json({ session: null } satisfies SessionStatus);
+      // A cookie left by a session that is over: said once, then forgotten.
+      deleteCookie(c, SESSION_COOKIE, { path: '/' });
+      return c.json({ session: null, reason: 'unauthorized' } satisfies SessionStatus);
+    }
+    const nasExpired = { session: null, reason: 'nas_session_expired' } satisfies SessionStatus;
+    if (!session.dsmValid) return c.json(nasExpired);
+    c.set('session', session);
+    c.set('token', token);
     // Makes sure DSM still accepts the session from time to time.
     if (Date.now() - (lastSessionCheck.get(token) ?? 0) > SESSION_CHECK_INTERVAL) {
       try {
         await withNas(c, (client, sid) => client.checkSession(sid));
         lastSessionCheck.set(token, Date.now());
       } catch (error) {
+        if (error instanceof AppError && error.code === 'nas_session_expired') {
+          return c.json(nasExpired);
+        }
         // An unreachable NAS should not log the user out.
         if (!(error instanceof AppError) || error.code !== 'nas_unreachable') throw error;
       }
     }
-    return c.json(sessionInfo(session));
+    return c.json({ session: sessionInfo(session) } satisfies SessionStatus);
   });
 
   api.post('/logout', requireSession, async (c) => {
@@ -303,18 +322,32 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     if (!isProviderId(id)) throw new HttpError(404, 'not_found');
     const body = (await c.req.json().catch(() => ({}))) as { apiKey?: unknown };
     const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
-    const provider = apiKey ? deps.providerWithKey(id, apiKey) : deps.provider(id);
-    return c.json(await provider.account());
+    // A refused key (or a service out of reach) is what the test found, not a failed request.
+    let result: ProviderTestResult;
+    try {
+      const provider = apiKey ? deps.providerWithKey(id, apiKey) : deps.provider(id);
+      result = { ok: true, account: await provider.account() };
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      result = { ok: false, error: error.toInfo() };
+    }
+    return c.json(result);
   });
 
   api.get('/folders', requireSession, requireAdmin, async (c) => {
     const raw = c.req.query('path');
     const path = raw ? normalizeDestination(raw) : null;
     if (raw && !path) throw new HttpError(400, 'invalid_request');
-    const folders = await withNas(c, (client, sid) =>
-      path ? client.listFolders(sid, path) : client.listShares(sid),
-    );
-    return c.json({ path, folders } satisfies FolderListing);
+    try {
+      const folders = await withNas(c, (client, sid) =>
+        path ? client.listFolders(sid, path) : client.listShares(sid),
+      );
+      return c.json({ path, exists: true, folders } satisfies FolderListing);
+    } catch (error) {
+      // A folder that does not exist is an answer: the app offers to create it.
+      if (!(error instanceof AppError) || error.code !== 'destination_missing') throw error;
+      return c.json({ path, exists: false, folders: [] } satisfies FolderListing);
+    }
   });
 
   api.post('/folders', requireSession, requireAdmin, async (c) => {

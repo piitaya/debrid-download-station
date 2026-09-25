@@ -32,8 +32,8 @@ export class DdsLoginPage extends LitElement {
     this.error = null;
     let code: ErrorCode;
     try {
-      await store.login(username, password, otp);
-      return;
+      if (await store.login(username, password, otp)) return;
+      code = 'otp_required';
     } catch (error) {
       code = error instanceof ApiError ? error.info.code : 'internal';
     } finally {
