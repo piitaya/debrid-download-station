@@ -1,27 +1,28 @@
-// Takes the README screenshots: runs the built app against the fake NAS / debrid services.
+// Takes the README screenshots: runs the built app against the fake NAS and debrid services.
 // Usage: npm run build && npm run screenshots
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Page } from 'playwright-core';
+import type { Browser, BrowserContextOptions, Page } from 'playwright-core';
 import { listen } from '../test/serve.js';
 import { createMockServer } from '../test/mocks/server.js';
 import { launchBrowser } from './browser.js';
 
-const OUT = new URL('../docs/screenshots/', import.meta.url);
+const OUT = new URL('../docs/screenshots/', import.meta.url).pathname;
 const PORT = 8099;
 const APP = `http://127.0.0.1:${PORT}`;
 
+rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
-const mock = createMockServer({ speed: 60 * 1024 * 1024 });
+const mock = createMockServer({ speed: 40 * 1024 * 1024 });
 const mockServer = await listen(mock.app);
 
 const dataDir = mkdtempSync(join(tmpdir(), 'dds-shots-'));
 writeFileSync(
   join(dataDir, 'settings.json'),
   JSON.stringify({
-    apiKeys: { alldebrid: 'mock', realdebrid: 'mock' },
+    apiKeys: { alldebrid: 'demo', realdebrid: 'demo' },
     defaultProvider: 'alldebrid',
     categories: [
       { id: 'films', name: 'Films', icon: 'movie', destination: 'video/Films' },
@@ -50,6 +51,8 @@ const server = spawn('node', ['dist/server/index.js'], {
   stdio: 'inherit',
 });
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function waitForServer(): Promise<void> {
   for (let i = 0; i < 50; i++) {
     try {
@@ -57,12 +60,17 @@ async function waitForServer(): Promise<void> {
     } catch {
       // Not up yet.
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await sleep(200);
   }
   throw new Error('Server did not start');
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** A stable fake info-hash for a name. */
+function fakeHash(name: string): string {
+  let value = 0;
+  for (const char of name) value = (value * 31 + char.charCodeAt(0)) >>> 0;
+  return value.toString(16).padStart(8, '0').repeat(5);
+}
 
 const iphone: BrowserContextOptions = {
   viewport: { width: 393, height: 852 },
@@ -74,22 +82,27 @@ const iphone: BrowserContextOptions = {
   locale: 'fr-FR',
 };
 const desktop: BrowserContextOptions = {
-  viewport: { width: 1360, height: 860 },
+  viewport: { width: 1280, height: 800 },
   deviceScaleFactor: 2,
   locale: 'fr-FR',
 };
 
+async function open(browser: Browser, options: BrowserContextOptions, scheme: 'light' | 'dark') {
+  const context = await browser.newContext({ ...options, colorScheme: scheme });
+  return { context, page: await context.newPage() };
+}
+
 async function login(page: Page): Promise<void> {
   await page.goto(APP);
-  await page.getByLabel(/utilisateur/).fill('paul');
-  await page.getByLabel('Mot de passe').fill('paul');
+  await page.getByPlaceholder(/utilisateur/).fill('paul');
+  await page.getByPlaceholder('Mot de passe').fill('paul');
   await page.getByRole('button', { name: 'Se connecter' }).click();
-  await page.getByText('Nouveau téléchargement').waitFor();
+  await page.getByRole('button', { name: 'Ajouter un téléchargement' }).first().waitFor();
 }
 
 async function shot(page: Page, name: string): Promise<void> {
-  await sleep(400);
-  await page.screenshot({ path: new URL(`${name}.png`, OUT).pathname });
+  await sleep(500);
+  await page.screenshot({ path: join(OUT, `${name}.png`) });
   console.log(`✓ ${name}.png`);
 }
 
@@ -98,81 +111,84 @@ try {
   const browser = await launchBrowser();
 
   // Login screen.
-  for (const scheme of ['light', 'dark'] as const) {
-    const context = await browser.newContext({ ...iphone, colorScheme: scheme });
-    const page = await context.newPage();
+  {
+    const { context, page } = await open(browser, iphone, 'light');
     await page.goto(APP);
     await page.getByRole('button', { name: 'Se connecter' }).waitFor();
-    await shot(page, `iphone-login-${scheme}`);
+    await shot(page, 'iphone-login-light');
     await context.close();
   }
 
-  // Fill the activity list through the API, like the app does.
-  const context = await browser.newContext({ ...iphone, colorScheme: 'light' });
-  const page = await context.newPage();
-  await login(page);
-  const add = async (magnet: string, categoryId: string, provider = 'alldebrid') => {
-    const response = await page.request.post(`${APP}/api/jobs`, {
-      headers: { 'X-Requested-With': 'dds' },
-      data: { magnets: [magnet], provider, categoryId },
-    });
-    if (!response.ok()) throw new Error(await response.text());
-  };
-  const hash = (n: number) => n.toString(16).padStart(40, '0');
-  await add(`magnet:?xt=urn:btih:${hash(1)}&dn=Big.Buck.Bunny.2008.720p.mkv`, 'films');
-  await add(`magnet:?xt=urn:btih:${hash(2)}&dn=Sintel.S01.1080p.WEB`, 'series');
-  await add(
-    `magnet:?xt=urn:btih:${hash(3)}&dn=Tears.of.Steel.2012.1080p.slow`,
-    'films',
-    'realdebrid',
-  );
-  await add(`magnet:?xt=urn:btih:${hash(4)}&dn=Cosmos.Laundromat.dead`, 'kids');
-  await sleep(9000);
-  await add(`magnet:?xt=urn:btih:${hash(5)}&dn=Spring.2019.1080p.mkv`, 'kids');
-  await sleep(2500);
+  // Sample downloads, added through the API like the app does.
+  {
+    const { context, page } = await open(browser, iphone, 'light');
+    await login(page);
+    const add = async (name: string, categoryId: string, provider = 'alldebrid') => {
+      const response = await page.request.post(`${APP}/api/jobs`, {
+        headers: { 'X-Requested-With': 'dds' },
+        data: {
+          magnets: [`magnet:?xt=urn:btih:${fakeHash(name)}&dn=${name}`],
+          provider,
+          categoryId,
+        },
+      });
+      if (!response.ok()) throw new Error(await response.text());
+    };
+    await add('Elephants.Dream.2006.720p.mkv', 'films');
+    await add('Cosmos.Laundromat.2015.1080p.dead', 'kids');
+    await sleep(9000);
+    await add('Sintel.S01.1080p.WEB-DL', 'series');
+    await add('Tears.of.Steel.2012.2160p.slow', 'films', 'realdebrid');
+    await add('Big.Buck.Bunny.2008.1080p.mkv', 'films');
+    await sleep(9000);
+    await context.close();
+  }
 
-  await page.reload();
-  await page.getByText('Activité').waitFor();
-  await page
-    .locator('dds-add-card textarea')
-    .fill(`magnet:?xt=urn:btih:${hash(6)}&dn=Agent.327.Operation.Barbershop.2017.2160p.mkv`);
-  await page.getByRole('button', { name: 'Séries', exact: true }).click();
-  await shot(page, 'iphone-home-light');
-
-  await page.goto(`${APP}/#/settings`);
-  await page.getByText('Services debrid').waitFor();
-  await sleep(800);
-  await shot(page, 'iphone-settings-light');
-  await context.close();
-
-  // Dark mode + expanded job.
-  const dark = await browser.newContext({ ...iphone, colorScheme: 'dark' });
-  const darkPage = await dark.newPage();
-  await login(darkPage);
-  await darkPage.getByText('Activité').waitFor();
-  await darkPage.locator('dds-job-card').filter({ hasText: 'Sintel' }).locator('.summary').click();
-  await darkPage.locator('dds-job-card').filter({ hasText: 'Sintel' }).scrollIntoViewIfNeeded();
-  await shot(darkPage, 'iphone-activity-dark');
-  await dark.close();
-
-  // Desktop.
   for (const scheme of ['light', 'dark'] as const) {
-    const wide = await browser.newContext({ ...desktop, colorScheme: scheme });
-    const widePage = await wide.newPage();
-    await login(widePage);
-    await widePage.getByText('Activité').waitFor();
-    await shot(widePage, `desktop-home-${scheme}`);
+    const { context, page } = await open(browser, iphone, scheme);
+    await login(page);
+    await shot(page, `iphone-downloads-${scheme}`);
+
     if (scheme === 'light') {
-      await widePage.goto(`${APP}/#/settings`);
-      await widePage.getByText('Dossiers', { exact: true }).waitFor();
-      await widePage.getByRole('button', { name: 'Ajouter un dossier' }).click();
-      await widePage.getByPlaceholder('Films, Séries…').fill('Documentaires');
-      await widePage.getByRole('button', { name: 'Parcourir' }).click();
-      await widePage.getByRole('button', { name: 'video', exact: true }).click();
-      await widePage.getByRole('button', { name: 'Choisir ce dossier' }).waitFor();
-      await shot(widePage, 'desktop-folder-picker');
+      await page.getByRole('button', { name: 'Ajouter un téléchargement' }).first().click();
+      await page
+        .locator('dds-add-sheet textarea')
+        .fill(
+          `magnet:?xt=urn:btih:${fakeHash('agent')}&dn=Agent.327.Operation.Barbershop.2017.2160p.mkv`,
+        );
+      await page.getByRole('radio', { name: /Séries/ }).click();
+      await shot(page, 'iphone-add-light');
+      await page.keyboard.press('Escape');
+
+      await page.goto(`${APP}/#/settings`);
+      await page.getByText('Services debrid').waitFor();
+      await sleep(1000);
+      await shot(page, 'iphone-settings-light');
+    } else {
+      await page.locator('dds-download-row').filter({ hasText: 'Sintel' }).click();
+      await sleep(400);
+      await shot(page, 'iphone-details-dark');
     }
-    await wide.close();
+    await context.close();
+  }
+
+  for (const scheme of ['light', 'dark'] as const) {
+    const { context, page } = await open(browser, desktop, scheme);
+    await login(page);
+    await shot(page, `desktop-downloads-${scheme}`);
+    if (scheme === 'light') {
+      await page.goto(`${APP}/#/settings`);
+      await page.getByRole('button', { name: /Ajouter une destination/ }).click();
+      await page.getByPlaceholder('Films, Séries…').fill('Documentaires');
+      await page.getByRole('button', { name: 'Parcourir' }).click();
+      await page.getByRole('button', { name: /^video/ }).click();
+      await page
+        .getByRole('button', { name: /Séries/ })
+        .last()
+        .waitFor();
+      await shot(page, 'desktop-folder-picker');
+    }
+    await context.close();
   }
 
   await browser.close();

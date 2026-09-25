@@ -99,7 +99,7 @@ export class DdsDestinationSheet extends LitElement {
     }
   }
 
-  private async remove(): Promise<void> {
+  private async deleteDestination(): Promise<void> {
     const settings = store.settings;
     const editing = this.editing;
     if (!settings || !editing) return;
@@ -212,7 +212,7 @@ export class DdsDestinationSheet extends LitElement {
                 <button
                   class="row destructive"
                   ?disabled=${this.saving || this.deleting}
-                  @click=${this.remove}
+                  @click=${this.deleteDestination}
                 >
                   ${t('destination.delete')}
                 </button>

@@ -152,6 +152,7 @@ const fr = {
   'picker.newFolderName': 'Nom du dossier',
   'picker.create': 'Créer',
   'picker.error': 'Impossible de lister les dossiers.',
+  'picker.location': 'Emplacement',
 
   'icon.movie': 'Films',
   'icon.tv': 'Séries',
@@ -366,6 +367,7 @@ const en: Record<MessageKey, string> = {
   'picker.newFolderName': 'Folder name',
   'picker.create': 'Create',
   'picker.error': 'Unable to list folders.',
+  'picker.location': 'Location',
 
   'icon.movie': 'Movies',
   'icon.tv': 'TV shows',

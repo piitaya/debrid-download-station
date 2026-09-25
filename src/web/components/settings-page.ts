@@ -1,12 +1,411 @@
-import { LitElement, html } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, css, html, nothing } from 'lit';
+import { customElement, query, state } from 'lit/decorators.js';
+import { live } from 'lit/directives/live.js';
+import { repeat } from 'lit/directives/repeat.js';
+import {
+  PROVIDER_IDS,
+  PROVIDERS,
+  type AppSettings,
+  type Category,
+  type ProviderId,
+  type SessionInfo,
+} from '../../shared/types.js';
+import { api } from '../api.js';
+import { breakable } from '../format.js';
+import { errorMessage, t } from '../i18n.js';
+import { categoryIcon, mdiArrowDown, mdiArrowUp, mdiChevronRight, mdiPlus } from '../icons.js';
+import { store, StoreController } from '../store.js';
+import type { DdsDestinationSheet } from './destination-sheet.js';
+import './destination-sheet.js';
+import './icon.js';
+import {
+  checkProvider,
+  errorInfo,
+  premiumLabel,
+  type DdsProviderSheet,
+  type ProviderCheck,
+  type ProviderCheckedDetail,
+} from './provider-sheet.js';
+import { sharedStyles } from './styles.js';
 
-/** Placeholder: replaced by the settings screen. */
+/** Settings changed in place (switches, order). */
+type InlinePatch = Partial<Pick<AppSettings, 'categories' | 'createSubfolder' | 'deleteFromDebrid'>>;
+
+/** "AllDebrid" → "AD". */
+const initials = (name: string) => (name.match(/[A-Z]/g) ?? [name]).join('').slice(0, 2);
+
 @customElement('dds-settings-page')
 export class DdsSettingsPage extends LitElement {
-  override render() {
-    return html``;
+  /** Account check of each configured provider. */
+  @state() private checks: Partial<Record<ProviderId, ProviderCheck>> = {};
+  /** Destinations are being reordered. */
+  @state() private reordering = false;
+
+  @query('dds-provider-sheet') private providerSheet!: DdsProviderSheet;
+  @query('dds-destination-sheet') private destinationSheet!: DdsDestinationSheet;
+
+  /** Outdates a check still in flight when the provider sheet reports a newer one. */
+  private checkRuns: Partial<Record<ProviderId, number>> = {};
+  /** In-place changes are sent one after the other. */
+  private saves: Promise<void> = Promise.resolve();
+  private pendingSaves = 0;
+
+  constructor() {
+    super();
+    new StoreController(this);
   }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    this.checkProviders();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.reordering = false;
+  }
+
+  private checkProviders(): void {
+    if (!store.session?.user.isAdmin || !store.settings) return;
+    for (const { id, configured } of store.settings.providers) {
+      if (!configured) continue;
+      const run = (this.checkRuns[id] = (this.checkRuns[id] ?? 0) + 1);
+      this.setCheck(id, { status: 'checking' });
+      void checkProvider(id).then((check) => {
+        if (this.checkRuns[id] === run) this.setCheck(id, check);
+      });
+    }
+  }
+
+  private setCheck(id: ProviderId, check: ProviderCheck | null): void {
+    const checks = { ...this.checks };
+    if (check) checks[id] = check;
+    else delete checks[id];
+    this.checks = checks;
+  }
+
+  private onProviderChecked(event: CustomEvent<ProviderCheckedDetail>): void {
+    const { id, check } = event.detail;
+    this.checkRuns[id] = (this.checkRuns[id] ?? 0) + 1;
+    this.setCheck(id, check);
+  }
+
+  /** Shows an in-place change at once, then saves it. */
+  private save(patch: InlinePatch): void {
+    if (!store.settings) return;
+    store.setSettings({ ...store.settings, ...patch });
+    this.pendingSaves++;
+    this.saves = this.saves.then(async () => {
+      try {
+        const settings = await api.updateSettings(patch);
+        // A newer change is on its way: its answer will be applied instead.
+        if (this.pendingSaves === 1) store.setSettings(settings);
+      } catch (error) {
+        store.toast(errorMessage(errorInfo(error).code), 'error');
+        const settings = await api.settings().catch(() => null);
+        if (settings) store.setSettings(settings);
+      } finally {
+        this.pendingSaves--;
+      }
+    });
+  }
+
+  private async move(index: number, offset: -1 | 1): Promise<void> {
+    const categories = [...(store.settings?.categories ?? [])];
+    const target = index + offset;
+    const [category] = categories.splice(index, 1);
+    if (!category || target < 0 || target > categories.length) return;
+    categories.splice(target, 0, category);
+    const hadFocus = !!this.shadowRoot?.activeElement?.closest('.move');
+    this.save({ categories });
+
+    // Keeps the keyboard focus on the moved destination.
+    if (!hadFocus) return;
+    await this.updateComplete;
+    const row = [...this.renderRoot.querySelectorAll<HTMLElement>('[data-id]')].find(
+      (element) => element.dataset.id === category.id,
+    );
+    const buttons = [...(row?.querySelectorAll<HTMLButtonElement>('.move button') ?? [])];
+    const preferred = buttons[offset < 0 ? 0 : 1];
+    (preferred && !preferred.disabled ? preferred : buttons.find((b) => !b.disabled))?.focus();
+  }
+
+  private registerMagnetHandler(): void {
+    try {
+      navigator.registerProtocolHandler('magnet', `${location.origin}${location.pathname}?magnet=%s`);
+      store.toast(t('settings.magnetHandlerDone'), 'info');
+    } catch {
+      store.toast(errorMessage('internal'), 'error');
+    }
+  }
+
+  override render() {
+    const { session, settings } = store;
+    if (!session || !settings) return nothing;
+    const admin = session.user.isAdmin;
+
+    return html`
+      ${admin
+        ? html`${this.renderServices(settings)} ${this.renderDestinations(settings)}
+          ${this.renderDownloading(settings)}`
+        : html`<p class="note">${t('settings.adminOnly')}</p>`}
+      ${this.renderAccount(session)}
+      <p class="about">${t('app.name')} · ${t('settings.version', { version: session.version })}</p>
+      ${admin
+        ? html`<dds-provider-sheet
+              @dds-provider-checked=${this.onProviderChecked}
+            ></dds-provider-sheet>
+            <dds-destination-sheet></dds-destination-sheet>`
+        : nothing}
+    `;
+  }
+
+  private renderServices(settings: AppSettings) {
+    const configuredCount = settings.providers.filter((p) => p.configured).length;
+    return html`<section class="section">
+      <h2 class="section-header">${t('settings.services')}</h2>
+      <div class="group with-icons">
+        ${PROVIDER_IDS.map((id) => {
+          const configured = settings.providers.some((p) => p.id === id && p.configured);
+          const isDefault = configured && configuredCount > 1 && settings.defaultProvider === id;
+          return this.renderProvider(id, configured, isDefault);
+        })}
+      </div>
+      <p class="section-footer">${t('settings.servicesFooter')}</p>
+    </section>`;
+  }
+
+  private renderProvider(id: ProviderId, configured: boolean, isDefault: boolean) {
+    const name = PROVIDERS[id].name;
+    const check = configured ? this.checks[id] : undefined;
+
+    const details: string[] = [];
+    if (check?.status === 'ok') details.push(check.account.username, premiumLabel(check.account));
+    if (check?.status === 'error') {
+      details.push(errorMessage(check.error.code).replace(/\.$/, ''));
+    }
+    if (isDefault) details.push(t('settings.default'));
+
+    const [value, tone] = !configured
+      ? [t('provider.notConfigured'), 'off']
+      : check?.status === 'ok'
+        ? [t('provider.connected'), 'ok']
+        : check?.status === 'error'
+          ? [t('provider.error'), 'bad']
+          : [t('provider.checking'), ''];
+
+    return html`<button class="row" @click=${() => this.providerSheet.open(id, this.checks[id])}>
+      <span class="row-icon initials" aria-hidden="true">${initials(name)}</span>
+      <span class="row-main">
+        <span class="row-title">${name}</span>
+        ${details.length ? html`<span class="row-subtitle">${details.join(' · ')}</span>` : nothing}
+      </span>
+      <span class="row-value ${tone}">${value}</span>
+      <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
+    </button>`;
+  }
+
+  private renderDestinations(settings: AppSettings) {
+    const { categories } = settings;
+    const reordering = this.reordering && categories.length > 1;
+    return html`<section class="section">
+      <div class="section-header">
+        <h2>${t('settings.destinations')}</h2>
+        ${categories.length > 1
+          ? html`<button class="btn btn-plain" @click=${() => (this.reordering = !reordering)}>
+              ${reordering ? t('settings.done') : t('settings.edit')}
+            </button>`
+          : nothing}
+      </div>
+      <div class="group with-icons">
+        ${repeat(
+          categories,
+          (category) => category.id,
+          (category, index) =>
+            this.renderCategory(
+              category,
+              index,
+              categories.length,
+              category.id === settings.defaultCategoryId,
+              reordering,
+            ),
+        )}
+        ${reordering
+          ? nothing
+          : html`<button class="row add" @click=${() => this.destinationSheet.open(null)}>
+              <span class="row-icon accent"><dds-icon .path=${mdiPlus}></dds-icon></span>
+              <span class="row-main">
+                <span class="row-title">${t('settings.addDestination')}</span>
+              </span>
+            </button>`}
+      </div>
+      <p class="section-footer">${t('settings.destinationsFooter')}</p>
+    </section>`;
+  }
+
+  private renderCategory(
+    category: Category,
+    index: number,
+    count: number,
+    isDefault: boolean,
+    reordering: boolean,
+  ) {
+    const content = html`
+      <span class="row-icon"><dds-icon .path=${categoryIcon(category.icon)}></dds-icon></span>
+      <span class="row-main">
+        <span class="row-title wrap">${category.name}</span>
+        <span class="row-subtitle">${breakable(category.destination)}</span>
+      </span>
+      ${isDefault ? html`<span class="row-value">${t('settings.default')}</span>` : nothing}
+    `;
+    if (!reordering) {
+      return html`<button
+        class="row"
+        data-id=${category.id}
+        @click=${() => this.destinationSheet.open(category)}
+      >
+        ${content}<dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
+      </button>`;
+    }
+    return html`<div class="row" data-id=${category.id}>
+      ${content}
+      <span class="move">
+        <button
+          class="icon-btn"
+          aria-label=${t('settings.moveUp')}
+          ?disabled=${index === 0}
+          @click=${() => this.move(index, -1)}
+        >
+          <dds-icon .path=${mdiArrowUp}></dds-icon>
+        </button>
+        <button
+          class="icon-btn"
+          aria-label=${t('settings.moveDown')}
+          ?disabled=${index === count - 1}
+          @click=${() => this.move(index, 1)}
+        >
+          <dds-icon .path=${mdiArrowDown}></dds-icon>
+        </button>
+      </span>
+    </div>`;
+  }
+
+  private renderDownloading(settings: AppSettings) {
+    return html`<section class="section">
+      <h2 class="section-header">${t('settings.downloading')}</h2>
+      <div class="group">
+        <label class="row">
+          <span class="row-main">
+            <span class="row-title">${t('settings.subfolder')}</span>
+            <span class="row-subtitle">${t('settings.subfolderHint')}</span>
+          </span>
+          <input
+            type="checkbox"
+            class="switch"
+            role="switch"
+            .checked=${live(settings.createSubfolder)}
+            @change=${(event: Event) =>
+              this.save({ createSubfolder: (event.target as HTMLInputElement).checked })}
+          />
+        </label>
+        <label class="row">
+          <span class="row-main">
+            <span class="row-title">${t('settings.cleanup')}</span>
+            <span class="row-subtitle">${t('settings.cleanupHint')}</span>
+          </span>
+          <input
+            type="checkbox"
+            class="switch"
+            role="switch"
+            .checked=${live(settings.deleteFromDebrid)}
+            @change=${(event: Event) =>
+              this.save({ deleteFromDebrid: (event.target as HTMLInputElement).checked })}
+          />
+        </label>
+      </div>
+    </section>`;
+  }
+
+  private renderAccount(session: SessionInfo) {
+    const canHandleMagnets =
+      window.isSecureContext && typeof navigator.registerProtocolHandler === 'function';
+    return html`<section class="section">
+      <h2 class="section-header">${t('settings.account')}</h2>
+      <div class="group">
+        <div class="row">
+          <span class="row-main">
+            <span class="row-title wrap">
+              ${t('settings.signedInAs', { user: session.user.username })}
+            </span>
+            <span class="row-subtitle mono wrap">${session.nasUrl}</span>
+          </span>
+        </div>
+        ${canHandleMagnets
+          ? html`<button class="row action" @click=${this.registerMagnetHandler}>
+              ${t('settings.magnetHandler')}
+            </button>`
+          : nothing}
+        <button class="row destructive" @click=${() => store.logout()}>
+          ${t('settings.signOut')}
+        </button>
+      </div>
+    </section>`;
+  }
+
+  static override styles = [
+    sharedStyles,
+    css`
+      .row:focus-visible {
+        box-shadow: inset var(--focus-ring);
+      }
+
+      .section-header h2 {
+        font: inherit;
+      }
+
+      .note {
+        margin-bottom: 20px;
+        padding: 0 16px;
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .initials {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+      }
+
+      .row-value.ok {
+        color: var(--success);
+      }
+
+      .row-value.bad {
+        color: var(--danger);
+      }
+
+      .row-value.off {
+        color: var(--text-tertiary);
+      }
+
+      .add {
+        color: var(--accent);
+      }
+
+      .move {
+        display: flex;
+        flex: none;
+        margin-right: -8px;
+      }
+
+      .about {
+        margin-top: 28px;
+        font-size: 13px;
+        text-align: center;
+        color: var(--text-tertiary);
+      }
+    `,
+  ];
 }
 
 declare global {

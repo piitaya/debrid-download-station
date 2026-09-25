@@ -64,7 +64,7 @@ export function premiumLabel(account: ProviderAccount): string {
  */
 @customElement('dds-provider-sheet')
 export class DdsProviderSheet extends LitElement {
-  @state() private id: ProviderId = 'alldebrid';
+  @state() private provider: ProviderId = 'alldebrid';
   /** Key typed by the user. */
   @state() private key = '';
   @state() private reveal = false;
@@ -83,17 +83,17 @@ export class DdsProviderSheet extends LitElement {
     new StoreController(this);
   }
 
-  private get state(): ProviderState | undefined {
-    return store.settings?.providers.find((provider) => provider.id === this.id);
+  private get providerState(): ProviderState | undefined {
+    return store.settings?.providers.find((state) => state.id === this.provider);
   }
 
   /** Opens the sheet; `known` is the last check of the saved key, when there is one. */
   async open(id: ProviderId, known?: ProviderCheck | null): Promise<void> {
-    this.id = id;
+    this.provider = id;
     this.key = '';
     this.reveal = false;
     this.checkRun++;
-    const configured = this.state?.configured ?? false;
+    const configured = this.providerState?.configured ?? false;
     this.check = configured && known && known.status !== 'checking' ? known : null;
     await this.updateComplete;
     await this.sheet.show();
@@ -109,7 +109,7 @@ export class DdsProviderSheet extends LitElement {
 
   /** Tests the typed key, or the saved one. */
   private async test(): Promise<void> {
-    const id = this.id;
+    const id = this.provider;
     const key = this.key.trim();
     const run = ++this.checkRun;
     this.check = { status: 'checking' };
@@ -120,7 +120,7 @@ export class DdsProviderSheet extends LitElement {
   }
 
   private async save(): Promise<void> {
-    const id = this.id;
+    const id = this.provider;
     const key = this.key.trim();
     if (!key || this.saving) return;
     this.saving = true;
@@ -143,7 +143,7 @@ export class DdsProviderSheet extends LitElement {
     if (!input.checked) return;
     this.working = true;
     try {
-      store.setSettings(await api.updateSettings({ defaultProvider: this.id }));
+      store.setSettings(await api.updateSettings({ defaultProvider: this.provider }));
     } catch (error) {
       input.checked = false;
       store.toast(errorMessage(errorInfo(error).code), 'error');
@@ -152,8 +152,8 @@ export class DdsProviderSheet extends LitElement {
     }
   }
 
-  private async remove(): Promise<void> {
-    const id = this.id;
+  private async removeKey(): Promise<void> {
+    const id = this.provider;
     if (!confirm(t('provider.removeConfirm', { name: PROVIDERS[id].name }))) return;
     this.working = true;
     try {
@@ -182,11 +182,11 @@ export class DdsProviderSheet extends LitElement {
   }
 
   override render() {
-    const provider = PROVIDERS[this.id];
-    const configured = this.state?.configured ?? false;
-    const fromEnv = this.state?.fromEnv ?? false;
+    const provider = PROVIDERS[this.provider];
+    const configured = this.providerState?.configured ?? false;
+    const fromEnv = this.providerState?.fromEnv ?? false;
     const configuredCount = store.settings?.providers.filter((p) => p.configured).length ?? 0;
-    const isDefault = store.settings?.defaultProvider === this.id;
+    const isDefault = store.settings?.defaultProvider === this.provider;
 
     return html`
       <dds-sheet
@@ -228,7 +228,7 @@ export class DdsProviderSheet extends LitElement {
                 <button
                   class="row destructive"
                   ?disabled=${this.working || this.saving}
-                  @click=${this.remove}
+                  @click=${this.removeKey}
                 >
                   ${t('provider.remove')}
                 </button>
@@ -269,13 +269,13 @@ export class DdsProviderSheet extends LitElement {
 
   /** The variable name is shown in monospace. */
   private renderFromEnv() {
-    const name = `${this.id.toUpperCase()}_API_KEY`;
+    const name = `${this.provider.toUpperCase()}_API_KEY`;
     const [before, after = ''] = t('provider.fromEnv', { name: '\u0000' }).split('\u0000');
     return html`${before}<code>${name}</code>${after}`;
   }
 
   private renderKey(configured: boolean) {
-    const provider = PROVIDERS[this.id];
+    const provider = PROVIDERS[this.provider];
     const testing = this.check?.status === 'checking';
     return html`<section class="section">
       <h3 class="section-header"><label for="key">${t('provider.apiKey')}</label></h3>
