@@ -93,6 +93,21 @@ vérifier.
 
 Ailleurs qu'avec Container Manager, `docker compose up -d` suffit.
 
+## Mise à jour
+
+Dans **Container Manager** :
+
+1. **Projet** → `syno-debrid` → **Action** → **Arrêter**, puis **Nettoyer** : le conteneur est
+   supprimé, pas les réglages.
+2. **Image** : supprimer `ghcr.io/piitaya/syno-debrid`.
+3. **Projet** → `syno-debrid` → **Action** → **Construire** : la dernière image est téléchargée et
+   l'app redémarre.
+
+Ailleurs : `docker compose pull && docker compose up -d`.
+
+Réglages, clés API, sessions et téléchargements en cours sont dans le dossier `data` du projet :
+c'est lui qu'il faut sauvegarder.
+
 ## Configuration
 
 Tout se règle par variables d'environnement. Les clés API et les destinations se règlent aussi
@@ -220,10 +235,11 @@ Les images Docker (amd64 et arm64) sont construites par GitHub Actions et publi�
 
 ## État du projet
 
-L'app est testée de bout en bout contre des simulations des API : DSM, Download Station, File
-Station, AllDebrid, Real-Debrid et TorBox. Ces simulations s'appuient sur la documentation
-officielle et sur le code de clients existants. Elle n'a pas encore été essayée sur un vrai NAS ni
-avec de vrais comptes debrid : les retours sont les bienvenus.
+L'app a été essayée sur un vrai NAS Synology avec AllDebrid. Elle est aussi testée de bout en bout
+contre des simulations des API : DSM, Download Station, File Station, AllDebrid, Real-Debrid et
+TorBox. Ces simulations s'appuient sur la documentation officielle et sur le code de clients
+existants. Real-Debrid et TorBox n'ont pas encore été essayés avec de vrais comptes : les retours
+sont les bienvenus.
 
 Syno Debrid n'est ni affilié à Synology, ni soutenu par Synology. Synology, DSM et Download Station
 sont des marques de Synology Inc.
