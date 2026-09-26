@@ -14,6 +14,15 @@ export function sanitizeSegment(name: string): string {
   return clean === '' || clean === '.' || clean === '..' ? '_' : clean;
 }
 
+/**
+ * A single file or folder name taken as is: no separator, not `.` or `..`, no control character.
+ * Unlike `sanitizeSegment`, it keeps names valid on the NAS (`?`, `:`…) unchanged.
+ */
+export function isPlainName(name: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return !!name.trim() && name !== '.' && name !== '..' && !/[/\\\u0000-\u001f\u007f]/.test(name);
+}
+
 export function splitPath(path: string): string[] {
   return path
     .split(/[\\/]+/)

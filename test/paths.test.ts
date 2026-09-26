@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { joinPath, planDownload, sanitizeSegment } from '../src/server/paths.js';
+import { isPlainName, joinPath, planDownload, sanitizeSegment } from '../src/server/paths.js';
 
 describe('sanitizeSegment', () => {
   it('removes characters NAS shares reject', () => {
@@ -7,6 +7,16 @@ describe('sanitizeSegment', () => {
     expect(sanitizeSegment('a/b\\c')).toBe('a b c');
     expect(sanitizeSegment('trailing dots...')).toBe('trailing dots');
     expect(sanitizeSegment('..')).toBe('_');
+  });
+});
+
+describe('isPlainName', () => {
+  it('accepts a single name as is, and nothing that could leave its folder', () => {
+    expect(isPlainName('Show.S01E01.mkv')).toBe(true);
+    expect(isPlainName('dl?id=1: part "2"')).toBe(true);
+    for (const name of ['', ' ', '.', '..', '../secret', 'a/b', 'a\\b', 'a\u0000b']) {
+      expect(isPlainName(name)).toBe(false);
+    }
   });
 });
 

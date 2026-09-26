@@ -14,7 +14,7 @@ import type { EventHub } from './events.js';
 import { log } from './logger.js';
 import type { DsTask, NasClient } from './nas/types.js';
 import { NasSessionError } from './nas/types.js';
-import { basename, dirname, joinPath, planDownload } from './paths.js';
+import { basename, dirname, isPlainName, joinPath, planDownload } from './paths.js';
 import type { Sessions } from './sessions.js';
 import type { JsonFile } from './storage.js';
 
@@ -527,6 +527,11 @@ export class JobManager {
   private async fixFileName(job: Job, sid: string, file: JobFile, task: DsTask): Promise<void> {
     const expected = basename(file.path);
     if (!task.title || task.title === expected) return;
+    // The name comes from Download Station: a path in it would point outside the folder.
+    if (!isPlainName(task.title)) {
+      log.warn(`Not renaming "${task.title}": not a plain file name`);
+      return;
+    }
     const folder = joinPath(job.destination, dirname(file.path));
     try {
       await this.deps.nas.rename(sid, joinPath(folder, task.title), expected);

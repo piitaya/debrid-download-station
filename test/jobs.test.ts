@@ -219,6 +219,33 @@ describe('JobManager', () => {
     expect(provider.torrents.get(job.debridId)?.deleted).toBe(true);
   });
 
+  it('renames a downloaded file only from a plain file name', async () => {
+    const { jobs, sessions, provider } = setup();
+    const { sid } = await nas.login({ account: 'paul', password: 'pw' });
+    sessions.create('paul', sid, true);
+    // Links that do not end with the file name: Download Station names the files after them.
+    const titles: Record<string, string> = { l1: 'dl?id=1', l2: '../../photo/secret.jpg' };
+    provider.unlock = async (_id, file) =>
+      `https://cdn.example/${encodeURIComponent(titles[file.ref]!)}?size=${file.size}`;
+    const renamed = dsm.state.renamed.length;
+    const job = jobs.create({
+      owner: 'paul',
+      provider: 'alldebrid',
+      debridId: (await provider.addMagnet()).id,
+      name: 'x',
+      category,
+    });
+
+    await run(jobs, 2);
+    clock += 10_000;
+    await run(jobs);
+    expect(job.status).toBe('completed');
+    // The second name holds a path: that file is left as it is.
+    expect(dsm.state.renamed.slice(renamed)).toEqual([
+      '/video/Séries/Show.S01/dl?id=1 -> Show.S01E01.mkv',
+    ]);
+  });
+
   it('clears finished jobs but keeps failed ones', async () => {
     const { jobs, provider } = setup();
     provider.nextDead = true;
