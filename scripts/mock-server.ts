@@ -7,5 +7,5 @@ const port = Number(process.env.MOCK_PORT ?? 5055);
 const { app } = createMockServer({ speed: 8 * 1024 * 1024 });
 serve({ fetch: app.fetch, port }, () => {
   console.log(`Mock NAS + debrid services on http://localhost:${port}`);
-  console.log('Copy .env.example to .env, then run `npm run dev`.');
+  console.log('In .env, use the "Without a NAS" lines of .env.example, then run `npm run dev`.');
 });

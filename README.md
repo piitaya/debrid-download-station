@@ -191,9 +191,10 @@ services debrid, avec des réglages et des téléchargements d'exemple. Comptes 
 - `marie` / `marie` : utilisateur ;
 - `secure` / `secure` : validation en deux étapes, code `123456`.
 
-Pour travailler avec un vrai NAS, renseigner `.env` (voir `.env.example`) puis lancer `npm run dev`
-(API sur :8080, interface sur http://localhost:5173). `npm run dev:mock` lance seulement les
-simulations, sur le port 5055.
+Pour travailler avec un vrai NAS, copier `.env.example` en `.env`, y mettre l'adresse du NAS puis
+lancer `npm run dev` (API sur :8080, interface sur http://localhost:5173). Les adresses des
+services debrid sont intégrées : rien à renseigner. `npm run dev:mock` lance seulement les
+simulations, sur le port 5055 (lignes « Without a NAS » de `.env.example`).
 
 ```bash
 npm test              # tests (Vitest)
