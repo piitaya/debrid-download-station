@@ -78,6 +78,7 @@ const STATUS_BY_CODE: Partial<Record<ErrorCode, ContentfulStatusCode>> = {
   category_missing: 400,
   provider_not_configured: 400,
   nas_not_configured: 503,
+  download_station_unavailable: 503,
   nas_unreachable: 502,
   provider_unreachable: 502,
 };
@@ -119,9 +120,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ error: { code: 'internal' } }, 500);
   });
 
-  // ADMIN_USERS when set, DSM administrators otherwise: a role DSM does not report is not admin.
+  // ADMIN_USERS when set, DSM administrators otherwise.
   const isAdmin = (session: StoredSession) =>
-    env.adminUsers.length ? env.adminUsers.includes(session.username) : session.isManager === true;
+    env.adminUsers.length ? env.adminUsers.includes(session.username) : session.isManager;
 
   const isHttps = (c: Ctx) =>
     new URL(c.req.url).protocol === 'https:' ||
@@ -268,12 +269,6 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     }
     jobs.resumeFor(username);
     log.info(`User "${username}" logged in`);
-    if (!env.adminUsers.length && result.isManager === null) {
-      log.warn(
-        `DSM does not say whether "${username}" is an administrator: the settings stay locked ` +
-          'for this account. Set ADMIN_USERS to choose who can change them.',
-      );
-    }
     return c.json({ session: sessionInfo(session) } satisfies SessionStatus);
   });
 

@@ -31,7 +31,7 @@ beforeAll(async () => {
     REALDEBRID_API_URL: `${server.url}/realdebrid`,
     TORBOX_API_URL: `${server.url}/torbox`,
     TORBOX_API_KEY: 'from-env',
-    ALLOWED_USERS: 'paul,marie,secure,luc',
+    ALLOWED_USERS: 'paul,marie,secure',
     DATA_DIR: dir,
   });
   const settings = new Settings(
@@ -173,12 +173,6 @@ describe('HTTP API', () => {
     expect((await marie('GET', 'settings')).status).toBe(200);
     expect((await marie('PUT', 'settings', { createSubfolder: false })).status).toBe(403);
     expect((await marie('GET', 'folders')).status).toBe(403);
-
-    // DSM does not say whether this account is an administrator: it is not one.
-    const luc = client();
-    await luc('POST', 'login', { username: 'luc', password: 'luc' });
-    expect((await luc('GET', 'session')).data.session.user.isAdmin).toBe(false);
-    expect((await luc('PUT', 'settings', { createSubfolder: false })).status).toBe(403);
   });
 
   it('takes a magnet and a .torrent file to Download Station', async () => {

@@ -124,6 +124,7 @@ export type ErrorCode =
   | 'nas_unreachable'
   | 'nas_not_configured'
   | 'nas_error'
+  | 'download_station_unavailable'
   // Generic
   | 'forbidden'
   | 'invalid_request'

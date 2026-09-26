@@ -9,8 +9,7 @@ export interface MockUser {
   password: string;
   /** When set, logging in requires this 2FA code. */
   otp?: string;
-  /** Download Station manager (DSM administrator); null: DSM does not say. */
-  isManager?: boolean | null;
+  isManager?: boolean;
 }
 
 export interface MockTask {
@@ -107,6 +106,8 @@ export function createMockDsm(options: MockDsmOptions = {}) {
   let nextSid = 1;
   let nextDevice = 1;
   const state = {
+    /** False: Download Station is not installed (its APIs are not listed). */
+    downloadStation: true,
     speed: options.speed ?? 40 * 1024 * 1024,
     calls: [] as string[],
     renamed: [] as string[],
@@ -161,7 +162,16 @@ export function createMockDsm(options: MockDsmOptions = {}) {
     error: { code, ...extra },
   });
 
-  app.post('/webapi/query.cgi', (c) => c.json({ success: true, data: API_INFO }));
+  app.post('/webapi/query.cgi', (c) =>
+    c.json({
+      success: true,
+      data: Object.fromEntries(
+        Object.entries(API_INFO).filter(
+          ([api]) => state.downloadStation || !api.includes('DownloadStation'),
+        ),
+      ),
+    }),
+  );
 
   app.post('/webapi/*', async (c) => {
     const params = (await c.req.parseBody()) as Record<string, string>;
@@ -203,10 +213,9 @@ export function createMockDsm(options: MockDsmOptions = {}) {
     const user = users[username]!;
 
     if (api === 'SYNO.DownloadStation.Info') {
-      const role = user.isManager === null ? {} : { is_manager: user.isManager ?? false };
       return c.json({
         success: true,
-        data: { ...role, version: 4000, version_string: '4.0.0' },
+        data: { is_manager: user.isManager ?? false, version: 4000, version_string: '4.0.0' },
       });
     }
 

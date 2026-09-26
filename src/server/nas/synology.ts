@@ -294,8 +294,8 @@ export class SynologyClient implements NasClient {
   ): Promise<T> {
     const info = (await this.infos())[api];
     if (!info) {
-      const hint = api.includes('DownloadStation') ? ' (is Download Station installed?)' : '';
-      throw new AppError('nas_error', `${api} is not available on this NAS${hint}`);
+      const code = api.includes('DownloadStation') ? 'download_station_unavailable' : 'nas_error';
+      throw new AppError(code, `${api} is not available on this NAS`);
     }
     const version = Math.max(
       info.minVersion,
@@ -321,6 +321,8 @@ export class SynologyClient implements NasClient {
   }
 
   async login(params: LoginParams): Promise<LoginResult> {
+    // Read the NAS's APIs again: Download Station may have been installed or updated since.
+    this.apiInfo = null;
     const request: Params = {
       account: params.account,
       passwd: params.password,
@@ -347,7 +349,7 @@ export class SynologyClient implements NasClient {
     if (!data.sid) throw new AppError('nas_error', 'Login succeeded without a session id');
 
     // Make sure the account may use Download Station (and find out if it manages it).
-    let isManager: boolean | null;
+    let isManager: boolean;
     try {
       isManager = await this.verifyAccess(data.sid);
     } catch (error) {
@@ -358,19 +360,20 @@ export class SynologyClient implements NasClient {
   }
 
   /** Returns whether the user is a Download Station manager (DSM administrator). */
-  private async verifyAccess(sid: string): Promise<boolean | null> {
-    if (!(await this.has('SYNO.DownloadStation.Info'))) {
-      await this.checkSession(sid);
-      return null;
-    }
+  private async verifyAccess(sid: string): Promise<boolean> {
     try {
+      if (!(await this.has('SYNO.DownloadStation.Info'))) {
+        // Only the newer API, which does not tell the role: not a manager.
+        await this.checkSession(sid);
+        return false;
+      }
       const info = await this.call<{ is_manager?: boolean }>(
         'SYNO.DownloadStation.Info',
         'getinfo',
         {},
         { sid, maxVersion: 1 },
       );
-      return typeof info.is_manager === 'boolean' ? info.is_manager : null;
+      return info.is_manager === true;
     } catch (error) {
       if (
         error instanceof NasSessionError ||

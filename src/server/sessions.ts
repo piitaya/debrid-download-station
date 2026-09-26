@@ -7,8 +7,8 @@ export interface StoredSession {
   dsmSid: string;
   /** False once DSM rejected the sid: the user has to log in again. */
   dsmValid: boolean;
-  /** DSM administrator (Download Station manager), when DSM told us. */
-  isManager: boolean | null;
+  /** DSM administrator (Download Station manager). */
+  isManager: boolean;
   createdAt: number;
   lastSeenAt: number;
   expiresAt: number;
@@ -38,7 +38,7 @@ export class Sessions {
   create(
     username: string,
     dsmSid: string,
-    isManager: boolean | null,
+    isManager: boolean,
   ): { token: string; session: StoredSession } {
     const token = randomBytes(32).toString('base64url');
     const now = Date.now();

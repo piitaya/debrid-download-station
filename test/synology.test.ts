@@ -9,7 +9,6 @@ const dsm = createMockDsm({
   users: {
     admin: { password: 'secret pass', isManager: true },
     bob: { password: 'bob', otp: '123456' },
-    carl: { password: 'carl', isManager: null },
   },
   folders: ['/video', '/video/Séries', '/music'],
 });
@@ -37,8 +36,18 @@ describe('SynologyClient', () => {
     expect(result.sid).toMatch(/^sid-/);
     expect(result.isManager).toBe(true);
     await client.checkSession(result.sid);
-    // DSM does not always say: the role stays unknown.
-    expect((await client.login({ account: 'carl', password: 'carl' })).isManager).toBeNull();
+  });
+
+  it('asks for Download Station when it is not there', async () => {
+    const login = () => client.login({ account: 'admin', password: 'secret pass' });
+    dsm.state.downloadStation = false;
+    try {
+      expect(await errorCode(login())).toBe('download_station_unavailable');
+    } finally {
+      dsm.state.downloadStation = true;
+    }
+    // Installed since: the next login sees it, without restarting the app.
+    expect((await login()).isManager).toBe(true);
   });
 
   it('maps login errors', async () => {

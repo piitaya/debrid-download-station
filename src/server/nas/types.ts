@@ -27,8 +27,8 @@ export interface LoginResult {
   sid: string;
   /** Device token returned when logging in with a 2FA code. */
   deviceId: string | null;
-  /** Whether the user manages Download Station (DSM administrators), when known. */
-  isManager: boolean | null;
+  /** Whether the user manages Download Station (DSM administrators). */
+  isManager: boolean;
 }
 
 /** Thrown when DSM no longer accepts a session id. */

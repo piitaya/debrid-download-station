@@ -216,6 +216,8 @@ const fr = {
   'error.nas_unreachable': 'NAS injoignable. Vérifiez SYNOLOGY_URL.',
   'error.nas_not_configured': 'L’adresse du NAS (SYNOLOGY_URL) n’est pas configurée.',
   'error.nas_error': 'Le NAS a renvoyé une erreur.',
+  'error.download_station_unavailable':
+    'Download Station ne répond pas sur le NAS : vérifiez qu’il est installé et démarré.',
   'error.forbidden': 'Action réservée aux administrateurs.',
   'error.invalid_request': 'Requête invalide.',
   'error.not_found': 'Élément introuvable.',
@@ -450,6 +452,8 @@ const en: Record<MessageKey, string> = {
   'error.nas_unreachable': 'Cannot reach the NAS. Check SYNOLOGY_URL.',
   'error.nas_not_configured': 'The NAS address (SYNOLOGY_URL) is not configured.',
   'error.nas_error': 'The NAS returned an error.',
+  'error.download_station_unavailable':
+    'Download Station does not answer on the NAS: check that it is installed and running.',
   'error.forbidden': 'Administrators only.',
   'error.invalid_request': 'Invalid request.',
   'error.not_found': 'Item not found.',
