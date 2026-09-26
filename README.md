@@ -22,7 +22,7 @@
 <summary>Plus de captures</summary>
 
 <p align="center">
-  <img src="docs/screenshots/iphone-setup-light.png" width="250" alt="Premier lancement : connexion à Download Station">
+  <img src="docs/screenshots/iphone-nas-light.png" width="250" alt="Connexion à Download Station">
   <img src="docs/screenshots/iphone-downloads-dark.png" width="250" alt="Téléchargements, mode sombre">
   <img src="docs/screenshots/iphone-settings-light.png" width="250" alt="Réglages">
 </p>
@@ -47,9 +47,9 @@
 - **Suivi en direct.** Progression chez le service debrid puis dans Download Station, fichier par
   fichier, avec possibilité de réessayer ou d'arrêter.
 - **Un compte pour l'app, un compte DSM pour Download Station.** On se connecte à l'app avec son
-  propre mot de passe. Les téléchargements sont créés avec un compte DSM choisi au premier
-  lancement, idéalement un compte dédié. L'app s'y reconnecte seule : les téléchargements
-  continuent sans personne.
+  propre mot de passe, ou sans mot de passe derrière un proxy qui authentifie (Authelia…). Les
+  téléchargements sont créés avec un compte DSM choisi dans les réglages, idéalement un compte
+  dédié. L'app s'y reconnecte seule : les téléchargements continuent sans personne.
 - **Pensé pour l'iPhone.** L'app s'installe sur l'écran d'accueil, passe en mode sombre
   automatiquement, et existe en français et en anglais.
 - **Léger.** Une image Docker d'environ 60 Mo (amd64 et arm64), sans base de données.
@@ -85,9 +85,12 @@ depuis le Centre de paquets).
    Coller ensuite le contenu de [`docker-compose.yml`](docker-compose.yml).
 
 3. Valider : l'image est téléchargée et le conteneur démarre.
-4. Ouvrir **`http://IP-DU-NAS:8080`**. L'app demande de créer son compte, puis de connecter
-   Download Station : adresse du NAS (`http://IP-DU-NAS:5000`), compte DSM et mot de passe.
-5. Dans les **Réglages** (⚙︎), coller la clé API du service debrid, puis ajouter les destinations.
+4. Ouvrir **`http://IP-DU-NAS:8080`** et créer le compte de l'app.
+5. L'écran d'accueil liste ce qu'il reste à faire, depuis les **Réglages** (⚙︎) :
+   - connecter Download Station : adresse du NAS (`http://IP-DU-NAS:5000`), compte DSM et mot de
+     passe ;
+   - coller la clé API du service debrid ;
+   - ajouter les destinations.
 
 Le premier qui ouvre l'app crée le compte : faire cette étape avant d'ouvrir l'accès depuis
 l'extérieur.
@@ -139,6 +142,7 @@ l'app. Le reste passe par des variables d'environnement.
 | `PUID` / `PGID`                                             | `1000` / `1000` | Propriétaire des fichiers de `/data`.                                                  |
 | `PORT`                                                      | `8080`          | Port HTTP du conteneur.                                                                |
 | `TRUST_PROXY`                                               | `false`         | Fait confiance à `X-Forwarded-For` (derrière un proxy inversé).                        |
+| `AUTH`                                                      | `password`      | `none` : pas de connexion à l'app, un proxy inversé s'en charge (voir plus bas).       |
 | `SESSION_TTL_DAYS`                                          | `30`            | Déconnexion après ce nombre de jours sans ouvrir l'app.                                |
 | `LOG_LEVEL`                                                 | `info`          | `debug`, `info`, `warn` ou `error`.                                                    |
 
@@ -152,8 +156,8 @@ mot de passe du compte DSM.
   moins, que l'on peut changer dans les Réglages ; les autres appareils sont alors déconnectés.
   On reste connecté tant qu'on ouvre l'app au moins une fois tous les 30 jours.
 - **Mot de passe oublié.** Supprimer `account.json` du dossier `data`, puis redémarrer le
-  conteneur : l'app propose de recréer le compte, en redemandant le mot de passe du compte DSM.
-  Réglages et téléchargements sont conservés.
+  conteneur : l'app propose de recréer le compte. Réglages, connexion à Download Station et
+  téléchargements sont conservés.
 - **Compte DSM.** Il lui faut **Download Station**, **File Station** (pour parcourir et créer les
   dossiers) et l'écriture dans les dossiers de destination. L'app garde son mot de passe,
   **chiffré**, pour se reconnecter quand DSM coupe la session (au bout de 7 jours, ou au
@@ -196,6 +200,16 @@ connexion → Avancé → Proxy inversé. Source `https://debrid.mondomaine.fr`,
 `http://localhost:8080`, puis ajouter `TRUST_PROXY=true` au conteneur. Créer le compte de l'app
 avant d'ouvrir cet accès.
 
+### Sans mot de passe (Authelia…)
+
+Avec `AUTH=none`, l'app ne demande plus de compte : c'est le proxy inversé qui décide qui entre,
+par exemple avec Authelia ou Authentik. Le proxy inversé de DSM ne sait pas authentifier (il ne
+filtre que des adresses IP) : il faut un autre proxy, comme Nginx Proxy Manager, Traefik ou
+Caddy.
+
+L'app doit alors n'être joignable **que par ce proxy** : ne pas publier le port `8080` sur le
+réseau (le mettre sur le même réseau Docker que le proxy, ou publier `127.0.0.1:8080:8080`).
+
 ## Bon à savoir
 
 - **Real-Debrid.**
@@ -225,7 +239,7 @@ npm run demo          # tout-en-un : http://localhost:5173, avec un faux NAS et 
 `npm run demo` lance l'interface (rechargement à chaud), l'API et des simulations du NAS et des
 services debrid, avec des réglages et des téléchargements d'exemple. On s'y connecte avec
 `demo` / `demo1234`. Avec `DEMO_SEED=0`, l'app démarre comme au premier lancement ; comptes du
-faux NAS pour l'étape Download Station :
+faux NAS pour connecter Download Station :
 
 - `syno-debrid` / `syno-debrid`, `admin` / `admin` ou `paul` / `paul` ;
 - `secure` / `secure` : validation en deux étapes, code `123456`.

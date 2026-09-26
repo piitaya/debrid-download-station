@@ -6,7 +6,6 @@ import type {
   SessionInfo,
   SessionStatus,
   SetupRequest,
-  SetupResult,
 } from '../shared/types.js';
 import { api, ApiError } from './api.js';
 
@@ -78,11 +77,10 @@ class Store extends EventTarget {
     else this.reset(status.reason ?? null);
   }
 
-  /** First start: creates the account and connects Download Station, then signs in. */
-  async setup(request: SetupRequest): Promise<SetupResult> {
-    const result = await api.setup(request);
-    if (result.ok) await this.signedIn(result.session);
-    return result;
+  /** First start: creates the account, then signs in. */
+  async setup(request: SetupRequest): Promise<void> {
+    const status = await api.setup(request);
+    if (status.session) await this.signedIn(status.session);
   }
 
   async logout(): Promise<void> {

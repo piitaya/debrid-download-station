@@ -19,29 +19,22 @@ const fr = {
   'login.submit': 'Se connecter',
   'login.forgot': 'Mot de passe oublié ?',
   'login.forgotHelp':
-    'Supprimez le fichier {file} du dossier data de l’app, puis redémarrez le conteneur. Vous pourrez alors recréer le compte, avec le mot de passe du compte DSM.',
+    'Supprimez le fichier {file} du dossier data de l’app, puis redémarrez le conteneur : l’app proposera de recréer le compte.',
 
-  'welcome.step': 'Étape {step} sur 2',
   'welcome.account': 'Créer votre compte',
   'welcome.accountHint': 'Il sert à vous connecter à l’app, depuis tous vos appareils.',
   'welcome.confirm': 'Confirmer le mot de passe',
   'welcome.passwordRule': '8 caractères minimum.',
   'welcome.mismatch': 'Les mots de passe ne correspondent pas.',
-  'welcome.continue': 'Continuer',
-  'welcome.nas': 'Connecter Download Station',
-  'welcome.nasHint':
-    'L’app crée les téléchargements avec ce compte DSM. Le mieux est un compte dédié, qui n’a accès qu’à Download Station, File Station et vos dossiers de téléchargement.',
-  'welcome.finish': 'Terminer',
+  'welcome.create': 'Créer le compte',
 
   'nas.title': 'Download Station',
   'nas.status': 'État',
   'nas.connection': 'Connexion',
   'nas.url': 'Adresse',
   'nas.urlPlaceholder': 'http://192.168.1.10:5000',
-  'nas.urlHint': 'L’adresse de DSM avec son port : 5000 en HTTP, 5001 en HTTPS.',
   'nas.account': 'Compte DSM',
   'nas.accountPlaceholder': 'Nom d’utilisateur DSM',
-  'nas.password': 'Mot de passe DSM',
   'nas.passwordPlaceholder': 'Requis pour enregistrer',
   'nas.code': 'Code',
   'nas.otp': 'Code de vérification',
@@ -51,6 +44,9 @@ const fr = {
   'nas.insecureTlsHint': 'Accepte le certificat de DSM sans le vérifier.',
   'nas.footer':
     'L’app crée les téléchargements avec ce compte. Le mot de passe est demandé à chaque modification.',
+  'nas.dedicated':
+    'L’app crée les téléchargements avec ce compte. Le mieux est un compte dédié, qui n’a accès qu’à Download Station, File Station et vos dossiers de téléchargement.',
+  'nas.connect': 'Connecter',
   'nas.saved': 'Connexion enregistrée',
 
   'password.current': 'Mot de passe actuel',
@@ -83,9 +79,10 @@ const fr = {
   'downloads.of': '{done} sur {total}',
   'downloads.loading': 'Chargement des téléchargements',
   'downloads.waitingNas':
-    'Download Station refuse la connexion. Vérifiez le compte DSM dans les réglages.',
+    'L’app ne peut pas se connecter à Download Station. Vérifiez la connexion dans les réglages.',
 
   'setup.title': 'Configuration',
+  'setup.nas': 'Connecter Download Station',
   'setup.provider': 'Ajouter une clé API debrid',
   'setup.destination': 'Créer une destination',
   'setup.open': 'Ouvrir les réglages',
@@ -127,7 +124,8 @@ const fr = {
   'add.notTorrent': '« {name} » n’est pas un fichier .torrent valide.',
   'add.drop': 'Déposer les fichiers .torrent',
   'add.remove': 'Retirer',
-  'add.notConfigured': 'Ajoutez d’abord un service debrid et une destination dans les réglages.',
+  'add.notConfigured':
+    'Terminez d’abord la configuration : Download Station, un service debrid et une destination.',
 
   'settings.nas': 'NAS',
   'settings.services': 'Services debrid',
@@ -301,29 +299,22 @@ const en: Record<MessageKey, string> = {
   'login.submit': 'Sign in',
   'login.forgot': 'Forgot password?',
   'login.forgotHelp':
-    'Delete {file} from the app’s data folder, then restart the container. You can then create the account again, with the password of the DSM account.',
+    'Delete {file} from the app’s data folder, then restart the container: the app will offer to create the account again.',
 
-  'welcome.step': 'Step {step} of 2',
   'welcome.account': 'Create your account',
   'welcome.accountHint': 'You sign in to the app with it, from all your devices.',
   'welcome.confirm': 'Confirm password',
   'welcome.passwordRule': 'At least 8 characters.',
   'welcome.mismatch': 'The passwords do not match.',
-  'welcome.continue': 'Continue',
-  'welcome.nas': 'Connect Download Station',
-  'welcome.nasHint':
-    'The app creates the downloads with this DSM account. Best is a dedicated account that can only use Download Station, File Station and your download folders.',
-  'welcome.finish': 'Finish',
+  'welcome.create': 'Create account',
 
   'nas.title': 'Download Station',
   'nas.status': 'Status',
   'nas.connection': 'Connection',
   'nas.url': 'Address',
   'nas.urlPlaceholder': 'http://192.168.1.10:5000',
-  'nas.urlHint': 'DSM’s address with its port: 5000 for HTTP, 5001 for HTTPS.',
   'nas.account': 'DSM account',
   'nas.accountPlaceholder': 'DSM username',
-  'nas.password': 'DSM password',
   'nas.passwordPlaceholder': 'Required to save',
   'nas.code': 'Code',
   'nas.otp': 'Verification code',
@@ -333,6 +324,9 @@ const en: Record<MessageKey, string> = {
   'nas.insecureTlsHint': 'Accepts DSM’s certificate without checking it.',
   'nas.footer':
     'The app creates the downloads with this account. The password is asked for any change.',
+  'nas.dedicated':
+    'The app creates the downloads with this account. Best is a dedicated account that can only use Download Station, File Station and your download folders.',
+  'nas.connect': 'Connect',
   'nas.saved': 'Connection saved',
 
   'password.current': 'Current password',
@@ -365,9 +359,10 @@ const en: Record<MessageKey, string> = {
   'downloads.of': '{done} of {total}',
   'downloads.loading': 'Loading downloads',
   'downloads.waitingNas':
-    'Download Station refuses the connection. Check the DSM account in Settings.',
+    'The app cannot connect to Download Station. Check the connection in Settings.',
 
   'setup.title': 'Setup',
+  'setup.nas': 'Connect Download Station',
   'setup.provider': 'Add a debrid API key',
   'setup.destination': 'Create a destination',
   'setup.open': 'Open settings',
@@ -408,7 +403,8 @@ const en: Record<MessageKey, string> = {
   'add.notTorrent': '“{name}” is not a valid .torrent file.',
   'add.drop': 'Drop .torrent files',
   'add.remove': 'Remove',
-  'add.notConfigured': 'Add a debrid service and a destination in Settings first.',
+  'add.notConfigured':
+    'Finish the setup first: Download Station, a debrid service and a destination.',
 
   'settings.nas': 'NAS',
   'settings.services': 'Debrid services',

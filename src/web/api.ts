@@ -14,7 +14,6 @@ import type {
   SessionStatus,
   SettingsUpdate,
   SetupRequest,
-  SetupResult,
 } from '../shared/types.js';
 
 export class ApiError extends Error {
@@ -68,7 +67,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 
 export const api = {
   session: () => request<SessionStatus>('GET', 'session'),
-  setup: (body: SetupRequest) => request<SetupResult>('POST', 'setup', body),
+  setup: (body: SetupRequest) => request<SessionStatus>('POST', 'setup', body),
   login: (body: { username: string; password: string }) =>
     request<SessionStatus>('POST', 'login', body),
   logout: () => request<void>('POST', 'logout'),

@@ -26,8 +26,8 @@ let app: ReturnType<typeof createApp>;
 let jobs: JobManager;
 let accountFile: JsonFile<StoredAccount | null>;
 
-beforeAll(async () => {
-  server = await listen(mock.app);
+/** The app, on a new data folder, with these environment variables. */
+function build(variables: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dds-api-'));
   const env = loadEnv({
     ALLDEBRID_API_URL: `${server.url}/alldebrid`,
@@ -35,12 +35,13 @@ beforeAll(async () => {
     TORBOX_API_URL: `${server.url}/torbox`,
     TORBOX_API_KEY: 'from-env',
     DATA_DIR: dir,
+    ...variables,
   });
   const settings = new Settings(
     new JsonFile<StoredSettings>(join(dir, 's.json'), defaultSettings),
     env,
   );
-  accountFile = new JsonFile<StoredAccount | null>(join(dir, 'a.json'), () => null);
+  const accountFile = new JsonFile<StoredAccount | null>(join(dir, 'a.json'), () => null);
   const account = new Account(accountFile);
   const sessions = new Sessions(
     new JsonFile<SessionMap>(join(dir, 'x.json'), () => ({})),
@@ -53,14 +54,14 @@ beforeAll(async () => {
     randomBytes(32),
     (url, insecureTls) => new SynologyClient({ baseUrl: url, insecureTls }),
   );
-  jobs = new JobManager({
+  const jobs = new JobManager({
     file: new JsonFile<JobsFile>(join(dir, 'j.json'), () => ({ jobs: [] })),
     nas,
     events,
     provider: (id) => providers.get(id),
     options: () => ({ createSubfolder: settings.createSubfolder, deleteFromDebrid: false }),
   });
-  app = createApp({
+  const app = createApp({
     env,
     settings,
     account,
@@ -73,11 +74,17 @@ beforeAll(async () => {
     loginLimiter: new RateLimiter(20, 60_000),
     nasLoginLimiter: new RateLimiter(20, 60_000),
   });
+  return { app, jobs, accountFile };
+}
+
+beforeAll(async () => {
+  server = await listen(mock.app);
+  ({ app, jobs, accountFile } = build());
 });
 afterAll(() => server.close());
 
 /** A tiny cookie-keeping client. */
-function client() {
+function client(target?: ReturnType<typeof createApp>) {
   const jar = new Map<string, string>();
   return async (
     method: string,
@@ -97,7 +104,7 @@ function client() {
       },
       body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
     };
-    const response = await app.request(`http://app.test/api/${path}`, init);
+    const response = await (target ?? app).request(`http://app.test/api/${path}`, init);
     for (const cookie of response.headers.getSetCookie()) {
       const [pair] = cookie.split(';');
       const [name, ...value] = pair!.split('=');
@@ -150,39 +157,43 @@ describe('HTTP API', () => {
     expect((await api('GET', 'health')).data).toMatchObject({ status: 'ok' });
     const noHeader = await app.request('http://app.test/api/setup', {
       method: 'POST',
-      body: JSON.stringify({ username: 'paul', password, nas: nasLogin() }),
+      body: JSON.stringify({ username: 'paul', password }),
     });
     expect(noHeader.status).toBe(403);
   });
 
-  it('creates the account along with a working Download Station login', async () => {
+  it('creates the account, then Download Station is connected from Settings', async () => {
     const api = client();
     const setup = (body: object) => api('POST', 'setup', { username: 'Paul', password, ...body });
 
-    expect(
-      await api('POST', 'setup', { username: 'paul', password: 'short', nas: nasLogin() }),
-    ).toMatchObject({ status: 400, data: { error: { code: 'weak_password' } } });
-    // What DSM says is an answer, and no account is made without a working login.
-    expect(await setup({ nas: { ...nasLogin(), password: 'nope' } })).toMatchObject({
+    expect(await setup({ password: 'short' })).toMatchObject({
+      status: 400,
+      data: { error: { code: 'weak_password' } },
+    });
+    expect((await setup({})).data).toMatchObject({ session: { username: 'Paul' } });
+    expect((await api('GET', 'session')).data.session.username).toBe('Paul');
+    // Only once.
+    expect((await setup({})).status).toBe(403);
+
+    // Download Station: listed as missing on the downloads screen until it is connected.
+    expect((await api('GET', 'settings')).data.nas).toBeNull();
+    expect((await api('GET', 'folders')).data.error.code).toBe('nas_not_configured');
+    // What DSM says is an answer.
+    expect(await api('PUT', 'nas', { ...nasLogin(), password: 'nope' })).toMatchObject({
       status: 200,
       data: { ok: false, error: { code: 'invalid_credentials' } },
     });
-    expect((await setup({ nas: nasLogin() })).data).toMatchObject({
+    expect((await api('PUT', 'nas', nasLogin())).data).toMatchObject({
       ok: false,
       error: { code: 'otp_required' },
     });
-    expect((await api('GET', 'session')).data.reason).toBe('setup_required');
-
-    const done = await setup({ nas: { ...nasLogin(), otp: '123 456' } });
-    expect(done.data).toMatchObject({ ok: true, session: { username: 'Paul' } });
-    expect((await api('GET', 'session')).data.session.username).toBe('Paul');
-    expect((await api('GET', 'settings')).data.nas).toEqual({
+    const saved = await api('PUT', 'nas', { ...nasLogin(), otp: '123 456' });
+    expect(saved.data.settings.nas).toEqual({
       url: server.url,
       account: 'secure',
       insecureTls: false,
     });
-    // Only once.
-    expect((await setup({ nas: nasLogin() })).status).toBe(403);
+    expect((await api('GET', 'folders')).status).toBe(200);
   });
 
   it('signs in and out with the account', async () => {
@@ -373,7 +384,7 @@ describe('HTTP API', () => {
     });
   });
 
-  it('starts over once the account is reset, with a working DSM login', async () => {
+  it('starts over once the account is reset', async () => {
     const api = await signedIn();
     const other = await signedIn();
     // account.json deleted, then the container restarted.
@@ -383,18 +394,33 @@ describe('HTTP API', () => {
       session: null,
       reason: 'setup_required',
     });
-    // Taking the app over needs a DSM login of the NAS.
-    const setup = (nas: object) =>
-      api('POST', 'setup', { username: 'someone', password: 'another password', nas });
-    expect((await setup({ ...nasLogin(), account: 'paul', password: 'guess' })).data).toMatchObject(
-      { ok: false, error: { code: 'invalid_credentials' } },
-    );
-    expect((await setup({ ...nasLogin(), account: 'paul', password: 'paul' })).data).toMatchObject({
-      ok: true,
-      session: { username: 'someone' },
-    });
+    const setup = await api('POST', 'setup', { username: 'someone', password: 'another password' });
+    expect(setup.data).toMatchObject({ session: { username: 'someone' } });
     expect((await client()('POST', 'login', { username: 'paul', password })).status).toBe(401);
-    // The devices of the previous account are signed out.
+    // The devices of the previous account are signed out; the settings stay.
     expect((await other('GET', 'settings')).status).toBe(401);
+    expect((await api('GET', 'settings')).data.nas.account).toBe('paul');
+  });
+});
+
+describe('AUTH=none', () => {
+  it('lets a reverse proxy authenticate', async () => {
+    const built = build({ AUTH: 'none' });
+    const api = client(built.app);
+    expect((await api('GET', 'session')).data).toMatchObject({ session: { username: null } });
+    expect((await api('GET', 'settings')).status).toBe(200);
+    expect((await api('POST', 'login', { username: 'paul', password: 'x' })).status).toBe(404);
+    expect((await api('POST', 'setup', { username: 'paul', password: 'long enough' })).status).toBe(
+      404,
+    );
+    // Download Station is set up from Settings.
+    expect((await api('GET', 'folders')).data.error.code).toBe('nas_not_configured');
+    const saved = await api('PUT', 'nas', {
+      url: server.url,
+      account: 'syno-debrid',
+      password: 'syno-debrid',
+    });
+    expect(saved.data).toMatchObject({ ok: true });
+    expect((await api('GET', 'folders')).status).toBe(200);
   });
 });

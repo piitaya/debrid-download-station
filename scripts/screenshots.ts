@@ -115,22 +115,25 @@ try {
   await waitForServer();
   const browser = await launchBrowser();
 
-  // First start: the account, then Download Station.
+  // First start: the account, then Download Station from Settings.
   {
     const { context, page } = await open(browser, iphone, 'light');
     await page.goto(APP);
     await page.getByPlaceholder(/utilisateur/).fill(ACCOUNT.username);
     await page.getByPlaceholder('Mot de passe', { exact: true }).fill(ACCOUNT.password);
     await page.getByPlaceholder('Confirmer le mot de passe').fill(ACCOUNT.password);
-    await page.getByRole('button', { name: 'Continuer' }).click();
-    await page.getByPlaceholder('http://192.168.1.10:5000').fill('http://192.168.1.10:5000');
-    await page.getByPlaceholder('Compte DSM').fill('syno-debrid');
-    await page.getByPlaceholder('Mot de passe DSM').fill('syno-debrid');
-    await page.locator('dds-setup-page input[name="nasPassword"]').blur();
-    await shot(page, 'iphone-setup-light');
-    await page.getByPlaceholder('http://192.168.1.10:5000').fill(NAS);
-    await page.getByRole('button', { name: 'Terminer' }).click();
-    await page.getByRole('button', { name: 'Ajouter un téléchargement' }).first().waitFor();
+    await page.getByRole('button', { name: 'Créer le compte' }).click();
+    await page.getByRole('link', { name: /Connecter Download Station/ }).click();
+    await page.getByRole('button', { name: /Download Station/ }).click();
+    const sheet = page.locator('dds-nas-sheet');
+    await sheet.locator('#url').fill('http://192.168.1.10:5000');
+    await sheet.locator('#account').fill('syno-debrid');
+    await sheet.locator('#password').fill('syno-debrid');
+    await sheet.locator('#password').blur();
+    await shot(page, 'iphone-nas-light');
+    await sheet.locator('#url').fill(NAS);
+    await sheet.getByRole('button', { name: 'Connecter' }).click();
+    await page.getByText('Connexion enregistrée').waitFor();
     await context.close();
   }
 

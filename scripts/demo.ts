@@ -72,20 +72,21 @@ async function waitForApi(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  // First start, as done in the app: the account, and Download Station on the fake NAS.
+  // As done in the app: the account, then Download Station on the fake NAS.
   const setup = await fetch(`${apiUrl}/api/setup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'dds' },
-    body: JSON.stringify({
-      username: 'demo',
-      password: 'demo1234',
-      nas: { url: mockUrl, account: 'syno-debrid', password: 'syno-debrid', insecureTls: false },
-    }),
+    body: JSON.stringify({ username: 'demo', password: 'demo1234' }),
   });
   const cookie = setup.headers
     .getSetCookie()
     .map((c) => c.split(';')[0])
     .join('; ');
+  await fetch(`${apiUrl}/api/nas`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'dds', Cookie: cookie },
+    body: JSON.stringify({ url: mockUrl, account: 'syno-debrid', password: 'syno-debrid' }),
+  });
   const hash = (n: number) => n.toString(16).padStart(40, '0');
   const samples: [string, string, string][] = [
     ['Elephants.Dream.2006.720p.mkv', 'films', 'alldebrid'],

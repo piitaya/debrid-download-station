@@ -74,7 +74,11 @@ log.info(`Syno Debrid ${env.version}`);
 for (const name of OBSOLETE_VARIABLES) {
   if (process.env[name]) log.warn(`${name} is no longer used: set up the NAS from the app.`);
 }
-if (!account.exists) log.info('No account yet: open the app to set it up.');
+if (env.auth === 'none') {
+  log.warn('AUTH=none: no sign-in. Only a reverse proxy that authenticates may reach the app.');
+} else if (!account.exists) {
+  log.info('No account yet: open the app to create it.');
+}
 const nasSettings = settings.nas;
 if (nasSettings) log.info(`Download Station: ${nasSettings.url}, account "${nasSettings.account}"`);
 const configured = settings.configuredProviders();

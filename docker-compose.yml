@@ -15,5 +15,7 @@ services:
       # ALLDEBRID_API_KEY: ''
       # REALDEBRID_API_KEY: ''
       # TORBOX_API_KEY: ''
+      # Optional: no sign-in, when a reverse proxy authenticates every request (Authelia…).
+      # AUTH: none
     volumes:
       - ./data:/data

@@ -62,12 +62,13 @@ export class DdsDownloadsPage extends LitElement {
 
   override render() {
     const settings = store.settings;
+    const hasNas = settings ? settings.nas !== null : true;
     const hasProvider = settings?.providers.some((provider) => provider.configured) ?? true;
     const hasDestination = settings ? settings.categories.length > 0 : true;
-    const configured = hasProvider && hasDestination;
+    const configured = hasNas && hasProvider && hasDestination;
 
     return html`
-      ${configured ? nothing : this.renderSetup(hasProvider, hasDestination)}
+      ${configured ? nothing : this.renderSetup(hasNas, hasProvider, hasDestination)}
       ${store.jobsLoaded ? this.renderJobs(configured) : this.renderLoading()}
       <dds-download-sheet></dds-download-sheet>
     `;
@@ -96,7 +97,7 @@ export class DdsDownloadsPage extends LitElement {
     `;
   }
 
-  private renderSetup(hasProvider: boolean, hasDestination: boolean) {
+  private renderSetup(hasNas: boolean, hasProvider: boolean, hasDestination: boolean) {
     const step = (done: boolean, title: string) => {
       const icon = html`<span
         class="step-icon"
@@ -121,7 +122,8 @@ export class DdsDownloadsPage extends LitElement {
       <section class="section">
         <h2 class="section-header">${t('setup.title')}</h2>
         <div class="group with-icons">
-          ${step(hasProvider, t('setup.provider'))} ${step(hasDestination, t('setup.destination'))}
+          ${step(hasNas, t('setup.nas'))} ${step(hasProvider, t('setup.provider'))}
+          ${step(hasDestination, t('setup.destination'))}
         </div>
         <p class="section-footer">${t('setup.next')}</p>
       </section>

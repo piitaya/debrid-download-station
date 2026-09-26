@@ -133,7 +133,8 @@ export class DdsAddSheet extends LitElement {
   }
 
   private get configured(): boolean {
-    return this.providers.length > 0 && (store.settings?.categories.length ?? 0) > 0;
+    const settings = store.settings;
+    return !!settings?.nas && this.providers.length > 0 && (settings?.categories.length ?? 0) > 0;
   }
 
   private get providers(): ProviderId[] {

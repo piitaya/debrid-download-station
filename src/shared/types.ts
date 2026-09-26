@@ -84,7 +84,8 @@ export interface SettingsUpdate {
 }
 
 export interface SessionInfo {
-  username: string;
+  /** Null when the app has no sign-in (AUTH=none: a reverse proxy authenticates). */
+  username: string | null;
   version: string;
 }
 
@@ -98,11 +99,10 @@ export interface SessionStatus {
   reason?: 'unauthorized' | 'setup_required';
 }
 
-/** First start: the app's account, and the connection to Download Station. */
+/** First start: the app's account. */
 export interface SetupRequest {
   username: string;
   password: string;
-  nas: NasUpdate;
 }
 
 /** Shortest password of the app's account. */
@@ -129,8 +129,7 @@ export interface ProviderAccount {
 
 /** POST /api/providers/:id/test */
 export type ProviderTestResult = Outcome<{ account: ProviderAccount }>;
-/** POST /api/setup: signed in once the account is created. */
-export type SetupResult = Outcome<{ session: SessionInfo }>;
+
 /** PUT /api/nas */
 export type NasSaveResult = Outcome<{ settings: AppSettings }>;
 

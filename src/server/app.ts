@@ -23,7 +23,6 @@ import {
   type ProviderTestResult,
   type SessionInfo,
   type SessionStatus,
-  type SetupResult,
 } from '../shared/types.js';
 import { parseNewPassword, parseUsername, type Account } from './account.js';
 import type { DebridProvider } from './debrid/types.js';
@@ -108,6 +107,8 @@ function parseNasUpdate(value: unknown): NasUpdate {
 
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   const { env, settings, account, sessions, nas, jobs, events } = deps;
+  /** AUTH=none: a reverse proxy authenticates every request, the app asks for nothing. */
+  const signIn = env.auth === 'password';
 
   const app = new Hono<{ Variables: Vars }>();
 
@@ -164,9 +165,15 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   };
 
   const sessionInfo = (): SessionInfo => ({
-    username: account.username ?? '',
+    username: signIn ? (account.username ?? '') : null,
     version: env.version,
   });
+
+  /** Routes of the app's account, when it has one. */
+  const requireSignIn: MiddlewareHandler<{ Variables: Vars }> = async (_c, next) => {
+    if (!signIn) throw new HttpError(404, 'not_found');
+    await next();
+  };
 
   /** Signs this browser in. */
   const startSession = (c: Ctx): void => {
@@ -214,6 +221,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   });
 
   const requireSession: MiddlewareHandler<{ Variables: Vars }> = async (c, next) => {
+    if (!signIn) return next();
     const token = getCookie(c, SESSION_COOKIE);
     // No account (first start, or reset): no session counts.
     if (!token || !account.exists || !sessions.get(token)) {
@@ -227,6 +235,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   // Being signed out is an answer, not an error (see SessionStatus).
   api.get('/session', (c) => {
+    if (!signIn) return c.json({ session: sessionInfo() } satisfies SessionStatus);
     if (!account.exists) {
       return c.json({ session: null, reason: 'setup_required' } satisfies SessionStatus);
     }
@@ -240,21 +249,14 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ session: sessionInfo() } satisfies SessionStatus);
   });
 
-  /**
-   * First start: creates the account, along with the connection to Download Station. Knowing a
-   * DSM login of the NAS is what allows it, also after a reset (account.json deleted).
-   */
-  api.post('/setup', async (c) => {
+  /** First start (or after account.json was deleted): creates the account. */
+  api.post('/setup', requireSignIn, async (c) => {
     if (account.exists || settingUp) throw new HttpError(403, 'forbidden');
     const input = await body(c);
     const username = parseUsername(input.username);
     const password = parseNewPassword(input.password);
-    const update = parseNasUpdate(input.nas);
-
     settingUp = true;
     try {
-      const outcome = await configureNas(update);
-      if (!outcome.ok) return c.json(outcome satisfies SetupResult);
       await account.create(username, password);
     } finally {
       settingUp = false;
@@ -263,10 +265,10 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     sessions.clear();
     startSession(c);
     log.info(`Account "${username}" created`);
-    return c.json({ ok: true, session: sessionInfo() } satisfies SetupResult);
+    return c.json({ session: sessionInfo() } satisfies SessionStatus);
   });
 
-  api.post('/login', async (c) => {
+  api.post('/login', requireSignIn, async (c) => {
     if (!account.exists) {
       return c.json({ session: null, reason: 'setup_required' } satisfies SessionStatus);
     }
@@ -287,13 +289,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ session: sessionInfo() } satisfies SessionStatus);
   });
 
-  api.post('/logout', requireSession, (c) => {
+  api.post('/logout', requireSignIn, requireSession, (c) => {
     sessions.delete(c.get('token'));
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
     return c.body(null, 204);
   });
 
-  api.post('/account/password', requireSession, async (c) => {
+  api.post('/account/password', requireSignIn, requireSession, async (c) => {
     const ip = clientIp(c);
     if (deps.loginLimiter.isBlocked(ip)) throw new HttpError(429, 'too_many_attempts');
     const input = await body(c);

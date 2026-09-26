@@ -418,6 +418,17 @@ export class DdsSettingsPage extends LitElement {
   private renderAccount(session: SessionInfo) {
     const canHandleMagnets =
       window.isSecureContext && typeof navigator.registerProtocolHandler === 'function';
+    const magnetHandler = canHandleMagnets
+      ? html`<button class="row accent" @click=${this.registerMagnetHandler}>
+          ${t('settings.magnetHandler')}
+        </button>`
+      : nothing;
+    // No sign-in (AUTH=none): a reverse proxy takes care of who may come in.
+    if (session.username === null) {
+      return canHandleMagnets
+        ? html`<section class="section"><div class="group">${magnetHandler}</div></section>`
+        : nothing;
+    }
     return html`<section class="section">
         <h2 class="section-header">${t('settings.account')}</h2>
         <div class="group">
@@ -431,13 +442,7 @@ export class DdsSettingsPage extends LitElement {
           <button class="row accent" @click=${() => this.passwordSheet.open()}>
             ${t('settings.changePassword')}
           </button>
-          ${
-            canHandleMagnets
-              ? html`<button class="row accent" @click=${this.registerMagnetHandler}>
-                  ${t('settings.magnetHandler')}
-                </button>`
-              : nothing
-          }
+          ${magnetHandler}
         </div>
       </section>
       <section class="section">

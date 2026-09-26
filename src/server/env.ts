@@ -8,6 +8,8 @@ export interface Env {
   dataDir: string;
   webRoot: string;
   version: string;
+  /** `none`: no sign-in, a reverse proxy authenticates every request (Authelia…). */
+  auth: 'password' | 'none';
   sessionTtlDays: number;
   /** Trust `X-Forwarded-*` headers set by a reverse proxy. */
   trustProxy: boolean;
@@ -62,6 +64,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     ),
     version:
       typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : (source.npm_package_version ?? 'dev'),
+    auth: source.AUTH?.trim().toLowerCase() === 'none' ? 'none' : 'password',
     sessionTtlDays: int(source.SESSION_TTL_DAYS, 30, 1, 365),
     trustProxy: bool(source.TRUST_PROXY, false),
     providerKeys,

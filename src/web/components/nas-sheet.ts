@@ -5,7 +5,7 @@ import type { ErrorInfo } from '../../shared/types.js';
 import { api } from '../api.js';
 import { t } from '../i18n.js';
 import { mdiAlertCircleOutline, mdiCheckCircleOutline } from '../icons.js';
-import { describeNasError, isHttps } from '../nas.js';
+import { describeNasError, guessNasUrl, isHttps } from '../nas.js';
 import { store } from '../store.js';
 import { inlineInputStyles } from './folder-picker.js';
 import './icon.js';
@@ -53,7 +53,12 @@ export class DdsNasSheet extends LitElement {
   /** Opens the sheet; `known` is the last check of the connection, when there is one. */
   async open(known?: NasCheck | null): Promise<void> {
     const nas = store.settings?.nas;
-    this.values = { url: nas?.url ?? '', account: nas?.account ?? '', password: '', otp: '' };
+    this.values = {
+      url: nas?.url ?? guessNasUrl(),
+      account: nas?.account ?? '',
+      password: '',
+      otp: '',
+    };
     this.insecureTls = nas?.insecureTls ?? false;
     this.needOtp = false;
     this.error = '';
@@ -62,7 +67,9 @@ export class DdsNasSheet extends LitElement {
     await this.updateComplete;
     await this.sheet.show();
     if (nas && !this.check) void this.test();
-    if (matchMedia('(pointer: fine)').matches) this.focusField(nas ? 'password' : 'url');
+    if (matchMedia('(pointer: fine)').matches) {
+      void this.focusField(nas ? 'password' : this.values.url ? 'account' : 'url');
+    }
   }
 
   private async test(): Promise<void> {
@@ -146,7 +153,7 @@ export class DdsNasSheet extends LitElement {
     return html`
       <dds-sheet
         heading=${t('nas.title')}
-        primaryLabel=${t('common.save')}
+        primaryLabel=${configured ? t('common.save') : t('nas.connect')}
         ?primaryDisabled=${!this.complete}
         ?busy=${this.saving}
         .error=${this.error}
@@ -181,7 +188,9 @@ export class DdsNasSheet extends LitElement {
                 : nothing
             }
           </div>
-          <p class="section-footer">${this.needOtp ? t('nas.otpHint') : t('nas.footer')}</p>
+          <p class="section-footer">
+            ${this.needOtp ? t('nas.otpHint') : configured ? t('nas.footer') : t('nas.dedicated')}
+          </p>
         </section>
         ${isHttps(this.values.url) ? this.renderInsecureTls() : nothing}
       </dds-sheet>
