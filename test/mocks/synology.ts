@@ -9,7 +9,8 @@ export interface MockUser {
   password: string;
   /** When set, logging in requires this 2FA code. */
   otp?: string;
-  isManager?: boolean;
+  /** Download Station manager (DSM administrator); null: DSM does not say. */
+  isManager?: boolean | null;
 }
 
 export interface MockTask {
@@ -202,9 +203,10 @@ export function createMockDsm(options: MockDsmOptions = {}) {
     const user = users[username]!;
 
     if (api === 'SYNO.DownloadStation.Info') {
+      const role = user.isManager === null ? {} : { is_manager: user.isManager ?? false };
       return c.json({
         success: true,
-        data: { is_manager: user.isManager ?? false, version: 4000, version_string: '4.0.0' },
+        data: { ...role, version: 4000, version_string: '4.0.0' },
       });
     }
 

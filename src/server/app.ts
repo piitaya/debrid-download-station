@@ -119,9 +119,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json({ error: { code: 'internal' } }, 500);
   });
 
-  // ADMIN_USERS when set, DSM administrators otherwise.
+  // ADMIN_USERS when set, DSM administrators otherwise: a role DSM does not report is not admin.
   const isAdmin = (session: StoredSession) =>
-    env.adminUsers.length ? env.adminUsers.includes(session.username) : session.isManager !== false;
+    env.adminUsers.length ? env.adminUsers.includes(session.username) : session.isManager === true;
 
   const isHttps = (c: Ctx) =>
     new URL(c.req.url).protocol === 'https:' ||
@@ -268,6 +268,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     }
     jobs.resumeFor(username);
     log.info(`User "${username}" logged in`);
+    if (!env.adminUsers.length && result.isManager === null) {
+      log.warn(
+        `DSM does not say whether "${username}" is an administrator: the settings stay locked ` +
+          'for this account. Set ADMIN_USERS to choose who can change them.',
+      );
+    }
     return c.json({ session: sessionInfo(session) } satisfies SessionStatus);
   });
 

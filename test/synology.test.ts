@@ -9,6 +9,7 @@ const dsm = createMockDsm({
   users: {
     admin: { password: 'secret pass', isManager: true },
     bob: { password: 'bob', otp: '123456' },
+    carl: { password: 'carl', isManager: null },
   },
   folders: ['/video', '/video/Séries', '/music'],
 });
@@ -36,6 +37,8 @@ describe('SynologyClient', () => {
     expect(result.sid).toMatch(/^sid-/);
     expect(result.isManager).toBe(true);
     await client.checkSession(result.sid);
+    // DSM does not always say: the role stays unknown.
+    expect((await client.login({ account: 'carl', password: 'carl' })).isManager).toBeNull();
   });
 
   it('maps login errors', async () => {

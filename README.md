@@ -120,7 +120,8 @@ lisibles uniquement par leur propriétaire.
   **Download Station**, et à **File Station** pour parcourir les dossiers et créer les
   sous-dossiers. Il lui faut aussi le droit d'écriture dans les dossiers de destination.
 - **Réglages.** Ils sont réservés aux administrateurs DSM, ou aux comptes listés dans
-  `ADMIN_USERS`.
+  `ADMIN_USERS`. Si DSM ne dit pas qui est administrateur (le journal du conteneur le signale),
+  seuls les comptes de `ADMIN_USERS` y ont accès.
 - **Mot de passe.** Il n'est **jamais stocké** : l'app garde uniquement la session DSM, côté
   serveur.
 - **Expiration de la session.** DSM fait expirer ses sessions au bout de 7 jours. Il faut alors
