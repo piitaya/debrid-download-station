@@ -97,7 +97,6 @@ export class DdsDownloadsPage extends LitElement {
   }
 
   private renderSetup(hasProvider: boolean, hasDestination: boolean) {
-    const admin = store.session?.user.isAdmin ?? false;
     const step = (done: boolean, title: string) => {
       const icon = html`<span
         class="step-icon"
@@ -106,8 +105,8 @@ export class DdsDownloadsPage extends LitElement {
       >
         <dds-icon .path=${done ? mdiCheckCircle : mdiCircleOutline}></dds-icon>
       </span>`;
-      // What is left to do opens the settings (administrators only).
-      if (done || !admin) {
+      // What is left to do opens the settings.
+      if (done) {
         return html`<div class="row step ${done ? 'done' : ''}">
           ${icon}<span class="row-title">${title}</span>
         </div>`;
@@ -124,7 +123,7 @@ export class DdsDownloadsPage extends LitElement {
         <div class="group with-icons">
           ${step(hasProvider, t('setup.provider'))} ${step(hasDestination, t('setup.destination'))}
         </div>
-        <p class="section-footer">${admin ? t('setup.next') : t('setup.adminOnly')}</p>
+        <p class="section-footer">${t('setup.next')}</p>
       </section>
     `;
   }

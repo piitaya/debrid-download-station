@@ -16,79 +16,98 @@ import {
   type AddJobsResponse,
   type ErrorCode,
   type FolderListing,
+  type NasSaveResult,
+  type NasUpdate,
+  type Outcome,
   type ProviderId,
   type ProviderTestResult,
   type SessionInfo,
   type SessionStatus,
+  type SetupResult,
 } from '../shared/types.js';
+import { parseNewPassword, parseUsername, type Account } from './account.js';
 import type { DebridProvider } from './debrid/types.js';
 import type { Env } from './env.js';
 import { AppError, HttpError, toErrorInfo } from './errors.js';
 import type { EventHub } from './events.js';
 import type { JobManager } from './jobs.js';
 import { log } from './logger.js';
-import type { NasLogins } from './nas-logins.js';
-import { NasSessionError, type NasClient } from './nas/types.js';
+import { NasLoginError, normalizeNasUrl, type NasConnection } from './nas-connection.js';
 import { joinPath, sanitizeSegment } from './paths.js';
 import type { RateLimiter } from './rate-limit.js';
-import type { Sessions, StoredSession } from './sessions.js';
+import type { Sessions } from './sessions.js';
 import { normalizeDestination, type Settings } from './settings.js';
 
 export interface AppDeps {
   env: Env;
   settings: Settings;
+  account: Account;
   sessions: Sessions;
-  /** Keeps the users' DSM sessions going. */
-  logins: NasLogins;
+  nas: NasConnection;
   jobs: JobManager;
   events: EventHub;
-  nas: NasClient | null;
   provider: (id: ProviderId) => DebridProvider;
   providerWithKey: (id: ProviderId, apiKey: string) => DebridProvider;
-  /** Failed logins per client IP. */
+  /** Failed sign-ins and password checks, per client IP. */
   loginLimiter: RateLimiter;
-  /** Failed logins overall: every login reaches DSM from the same (container) IP. */
-  globalLoginLimiter: RateLimiter;
+  /**
+   * Failed DSM logins when setting up Download Station, from anywhere: DSM blocks the
+   * container's IP after 10 of them in 5 minutes.
+   */
+  nasLoginLimiter: RateLimiter;
 }
 
-type Vars = { session: StoredSession; token: string };
+type Vars = { token: string };
 type Ctx = Context<{ Variables: Vars }>;
 
 const SESSION_COOKIE = 'dds_session';
-const DEVICE_COOKIE = 'dds_device';
 const MAX_TORRENT_SIZE = 10 * 1024 * 1024;
-const SESSION_CHECK_INTERVAL = 5 * 60 * 1000;
 
 const STATUS_BY_CODE: Partial<Record<ErrorCode, ContentfulStatusCode>> = {
   unauthorized: 401,
-  nas_session_expired: 401,
   invalid_credentials: 401,
-  otp_required: 401,
-  otp_invalid: 401,
-  otp_setup_required: 403,
-  not_allowed: 403,
-  no_permission: 403,
-  account_disabled: 403,
-  password_expired: 403,
-  ip_blocked: 403,
   forbidden: 403,
+  no_permission: 403,
+  file_station_denied: 403,
   too_many_attempts: 429,
   provider_rate_limited: 429,
   not_found: 404,
   invalid_request: 400,
+  weak_password: 400,
   magnet_invalid: 400,
   torrent_invalid: 400,
   category_missing: 400,
   provider_not_configured: 400,
   nas_not_configured: 503,
+  nas_session_expired: 503,
   download_station_unavailable: 503,
   nas_unreachable: 502,
+  nas_certificate: 502,
   provider_unreachable: 502,
 };
 
+/** DSM logins that DSM counts as failed (toward blocking the IP). */
+const FAILED_NAS_LOGINS: ReadonlySet<ErrorCode> = new Set(['invalid_credentials', 'otp_invalid']);
+
+/** Body of a new Download Station connection; throws when a field is missing. */
+function parseNasUpdate(value: unknown): NasUpdate {
+  const body = (value ?? {}) as Record<string, unknown>;
+  const url = typeof body.url === 'string' ? normalizeNasUrl(body.url) : null;
+  const account = typeof body.account === 'string' ? body.account.trim() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  const otp = typeof body.otp === 'string' ? body.otp.replace(/\s/g, '') : '';
+  if (!url || !account || !password) throw new HttpError(400, 'invalid_request');
+  return {
+    url,
+    account,
+    password,
+    insecureTls: body.insecureTls === true,
+    ...(otp ? { otp } : {}),
+  };
+}
+
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
-  const { env, settings, sessions, logins, jobs, events } = deps;
-  const lastSessionCheck = new Map<string, number>();
+  const { env, settings, account, sessions, nas, jobs, events } = deps;
 
   const app = new Hono<{ Variables: Vars }>();
 
@@ -116,16 +135,17 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
   app.onError((error, c) => {
     if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof HttpError) return c.json({ error: error.toInfo() }, error.status);
+    if (error instanceof NasLoginError) {
+      // What DSM said shows in Settings → Download Station.
+      const code = error.code === 'nas_not_configured' ? error.code : 'nas_login_failed';
+      return c.json({ error: { code } }, 503);
+    }
     if (error instanceof AppError) {
       return c.json({ error: error.toInfo() }, STATUS_BY_CODE[error.code] ?? 502);
     }
     log.error(`Unhandled error on ${c.req.method} ${c.req.path}`, error);
     return c.json({ error: { code: 'internal' } }, 500);
   });
-
-  // ADMIN_USERS when set, DSM administrators otherwise.
-  const isAdmin = (session: StoredSession) =>
-    env.adminUsers.length ? env.adminUsers.includes(session.username) : session.isManager;
 
   const isHttps = (c: Ctx) =>
     new URL(c.req.url).protocol === 'https:' ||
@@ -143,32 +163,42 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     }
   };
 
-  const nas = (): NasClient => {
-    if (!deps.nas) throw new HttpError(503, 'nas_not_configured');
-    return deps.nas;
+  const sessionInfo = (): SessionInfo => ({
+    username: account.username ?? '',
+    version: env.version,
+  });
+
+  /** Signs this browser in. */
+  const startSession = (c: Ctx): void => {
+    const { token } = sessions.create();
+    setCookie(c, SESSION_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'Lax',
+      secure: isHttps(c),
+      path: '/',
+      maxAge: env.sessionTtlDays * 24 * 3600,
+    });
   };
 
+  const body = async (c: Ctx) => (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
   /**
-   * Runs a NAS call with the user's DSM session. When DSM dropped it, logs in again with the
-   * stored login and makes the call once more.
+   * Tries a new Download Station connection. DSM refusing it is an expected outcome, not an
+   * error; failed logins are counted, as DSM counts them.
    */
-  const withNas = async <T>(c: Ctx, call: (client: NasClient, sid: string) => Promise<T>) => {
-    const session = c.get('session');
+  const configureNas = async (update: NasUpdate): Promise<Outcome> => {
+    if (deps.nasLoginLimiter.isBlocked('*')) throw new HttpError(429, 'too_many_attempts');
     try {
-      return await call(nas(), session.dsmSid);
+      await nas.configure(update);
+      return { ok: true };
     } catch (error) {
-      if (!(error instanceof NasSessionError)) throw error;
-      await logins.expired(session.dsmSid);
-      if (!session.dsmValid) throw new HttpError(401, 'nas_session_expired');
-      return call(nas(), session.dsmSid);
+      if (!(error instanceof AppError)) throw error;
+      if (FAILED_NAS_LOGINS.has(error.code)) deps.nasLoginLimiter.fail('*');
+      return { ok: false, error: error.toInfo() };
     }
   };
 
-  const sessionInfo = (session: StoredSession): SessionInfo => ({
-    user: { username: session.username, isAdmin: isAdmin(session) },
-    nasUrl: env.synologyUrl ?? '',
-    version: env.version,
-  });
+  let settingUp = false;
 
   const api = new Hono<{ Variables: Vars }>();
 
@@ -185,147 +215,129 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
 
   const requireSession: MiddlewareHandler<{ Variables: Vars }> = async (c, next) => {
     const token = getCookie(c, SESSION_COOKIE);
-    const session = sessions.get(token);
-    if (!session || !token) throw new HttpError(401, 'unauthorized');
-    if (!(await logins.revive(session))) throw new HttpError(401, 'nas_session_expired');
-    c.set('session', session);
+    // No account (first start, or reset): no session counts.
+    if (!token || !account.exists || !sessions.get(token)) {
+      throw new HttpError(401, 'unauthorized');
+    }
     c.set('token', token);
-    await next();
-  };
-
-  const requireAdmin: MiddlewareHandler<{ Variables: Vars }> = async (c, next) => {
-    if (!isAdmin(c.get('session'))) throw new HttpError(403, 'forbidden');
     await next();
   };
 
   api.get('/health', (c) => c.json({ status: 'ok', version: env.version }));
 
-  api.post('/login', async (c) => {
-    const ip = clientIp(c);
-    if (deps.loginLimiter.isBlocked(ip) || deps.globalLoginLimiter.isBlocked('*')) {
-      throw new HttpError(429, 'too_many_attempts');
-    }
-    const fail = () => {
-      deps.loginLimiter.fail(ip);
-      deps.globalLoginLimiter.fail('*');
-    };
-    const client = nas();
-
-    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-    const username = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
-    const password = typeof body.password === 'string' ? body.password : '';
-    const otp = typeof body.otp === 'string' ? body.otp.replace(/\s/g, '') : '';
-    if (!username || !password) throw new HttpError(400, 'invalid_request');
-
-    let deviceId: string | undefined;
-    try {
-      const device = JSON.parse(getCookie(c, DEVICE_COOKIE) ?? '{}') as { u?: string; d?: string };
-      if (device.u === username && device.d) deviceId = device.d;
-    } catch {
-      // Ignore a malformed cookie.
-    }
-
-    let result;
-    try {
-      result = await client.login({
-        account: username,
-        password,
-        otpCode: otp || undefined,
-        deviceId,
-      });
-    } catch (error) {
-      if (error instanceof AppError && error.code === 'otp_required') {
-        // The password is right: the code is the next step, not a failed attempt.
-        return c.json({ session: null, reason: 'otp_required' } satisfies SessionStatus);
-      }
-      if (
-        error instanceof AppError &&
-        ['invalid_credentials', 'otp_invalid'].includes(error.code)
-      ) {
-        fail();
-      }
-      throw error;
-    }
-
-    if (env.allowedUsers.length && !env.allowedUsers.includes(username)) {
-      await client.logout(result.sid).catch(() => undefined);
-      fail();
-      throw new HttpError(403, 'not_allowed');
-    }
-    deps.loginLimiter.reset(ip);
-
-    // The password is kept (encrypted) to log in again when DSM drops the session.
-    const credentials = logins.seal({ password, deviceId: result.deviceId ?? deviceId ?? null });
-    const { token, session } = sessions.create(username, result.sid, result.isManager, credentials);
-    const secure = isHttps(c);
-    setCookie(c, SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'Lax',
-      secure,
-      path: '/',
-      maxAge: env.sessionTtlDays * 24 * 3600,
-    });
-    if (result.deviceId) {
-      setCookie(c, DEVICE_COOKIE, JSON.stringify({ u: username, d: result.deviceId }), {
-        httpOnly: true,
-        sameSite: 'Lax',
-        secure,
-        path: '/',
-        maxAge: 365 * 24 * 3600,
-      });
-    }
-    jobs.resumeFor(username);
-    log.info(`User "${username}" logged in`);
-    return c.json({ session: sessionInfo(session) } satisfies SessionStatus);
-  });
-
   // Being signed out is an answer, not an error (see SessionStatus).
-  api.get('/session', async (c) => {
+  api.get('/session', (c) => {
+    if (!account.exists) {
+      return c.json({ session: null, reason: 'setup_required' } satisfies SessionStatus);
+    }
     const token = getCookie(c, SESSION_COOKIE);
-    const session = sessions.get(token);
-    if (!token || !session) {
-      if (!token) return c.json({ session: null } satisfies SessionStatus);
+    if (!token) return c.json({ session: null } satisfies SessionStatus);
+    if (!sessions.get(token)) {
       // A cookie left by a session that is over: said once, then forgotten.
       deleteCookie(c, SESSION_COOKIE, { path: '/' });
       return c.json({ session: null, reason: 'unauthorized' } satisfies SessionStatus);
     }
-    const nasExpired = { session: null, reason: 'nas_session_expired' } satisfies SessionStatus;
-    if (!(await logins.revive(session))) return c.json(nasExpired);
-    c.set('session', session);
-    c.set('token', token);
-    // Makes sure DSM still accepts the session from time to time.
-    if (Date.now() - (lastSessionCheck.get(token) ?? 0) > SESSION_CHECK_INTERVAL) {
-      try {
-        await withNas(c, (client, sid) => client.checkSession(sid));
-        lastSessionCheck.set(token, Date.now());
-      } catch (error) {
-        if (error instanceof AppError && error.code === 'nas_session_expired') {
-          return c.json(nasExpired);
-        }
-        // An unreachable NAS should not log the user out.
-        if (!(error instanceof AppError) || error.code !== 'nas_unreachable') throw error;
-      }
-    }
-    return c.json({ session: sessionInfo(session) } satisfies SessionStatus);
+    return c.json({ session: sessionInfo() } satisfies SessionStatus);
   });
 
-  api.post('/logout', requireSession, async (c) => {
-    const session = sessions.delete(c.get('token'));
-    lastSessionCheck.delete(c.get('token'));
+  /**
+   * First start: creates the account, along with the connection to Download Station. Knowing a
+   * DSM login of the NAS is what allows it, also after a reset (account.json deleted).
+   */
+  api.post('/setup', async (c) => {
+    if (account.exists || settingUp) throw new HttpError(403, 'forbidden');
+    const input = await body(c);
+    const username = parseUsername(input.username);
+    const password = parseNewPassword(input.password);
+    const update = parseNasUpdate(input.nas);
+
+    settingUp = true;
+    try {
+      const outcome = await configureNas(update);
+      if (!outcome.ok) return c.json(outcome satisfies SetupResult);
+      await account.create(username, password);
+    } finally {
+      settingUp = false;
+    }
+    // Sessions of a previous account are over.
+    sessions.clear();
+    startSession(c);
+    log.info(`Account "${username}" created`);
+    return c.json({ ok: true, session: sessionInfo() } satisfies SetupResult);
+  });
+
+  api.post('/login', async (c) => {
+    if (!account.exists) {
+      return c.json({ session: null, reason: 'setup_required' } satisfies SessionStatus);
+    }
+    const ip = clientIp(c);
+    if (deps.loginLimiter.isBlocked(ip)) throw new HttpError(429, 'too_many_attempts');
+    const input = await body(c);
+    const username = typeof input.username === 'string' ? input.username.trim() : '';
+    const password = typeof input.password === 'string' ? input.password : '';
+    if (!username || !password) throw new HttpError(400, 'invalid_request');
+
+    if (!(await account.check(username, password))) {
+      deps.loginLimiter.fail(ip);
+      log.warn(`Failed sign-in from ${ip}`);
+      throw new HttpError(401, 'invalid_credentials');
+    }
+    deps.loginLimiter.reset(ip);
+    startSession(c);
+    return c.json({ session: sessionInfo() } satisfies SessionStatus);
+  });
+
+  api.post('/logout', requireSession, (c) => {
+    sessions.delete(c.get('token'));
     deleteCookie(c, SESSION_COOKIE, { path: '/' });
-    if (session && deps.nas) await deps.nas.logout(session.dsmSid).catch(() => undefined);
     return c.body(null, 204);
+  });
+
+  api.post('/account/password', requireSession, async (c) => {
+    const ip = clientIp(c);
+    if (deps.loginLimiter.isBlocked(ip)) throw new HttpError(429, 'too_many_attempts');
+    const input = await body(c);
+    const password = parseNewPassword(input.password);
+    if (!(await account.checkPassword(typeof input.current === 'string' ? input.current : ''))) {
+      deps.loginLimiter.fail(ip);
+      return c.json({ ok: false, error: { code: 'wrong_password' } } satisfies Outcome);
+    }
+    await account.setPassword(password);
+    // Every other device is signed out; this one gets a new session.
+    sessions.clear();
+    startSession(c);
+    log.info('Password changed');
+    return c.json({ ok: true } satisfies Outcome);
   });
 
   api.get('/settings', requireSession, (c) => c.json(settings.toPublic()));
 
-  api.put('/settings', requireSession, requireAdmin, async (c) => {
+  api.put('/settings', requireSession, async (c) => {
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body !== 'object') throw new HttpError(400, 'invalid_request');
     return c.json(settings.update(body));
   });
 
-  api.post('/providers/:id/test', requireSession, requireAdmin, async (c) => {
+  // Checks the connection to Download Station (logging in again if need be).
+  api.post('/nas/test', requireSession, async (c) => {
+    try {
+      await nas.test();
+      return c.json({ ok: true } satisfies Outcome);
+    } catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      return c.json({ ok: false, error: error.toInfo() } satisfies Outcome);
+    }
+  });
+
+  api.put('/nas', requireSession, async (c) => {
+    const outcome = await configureNas(parseNasUpdate(await body(c)));
+    if (!outcome.ok) return c.json(outcome satisfies NasSaveResult);
+    // Downloads waiting for Download Station go on.
+    jobs.resume();
+    return c.json({ ok: true, settings: settings.toPublic() } satisfies NasSaveResult);
+  });
+
+  api.post('/providers/:id/test', requireSession, async (c) => {
     const id = c.req.param('id');
     if (!isProviderId(id)) throw new HttpError(404, 'not_found');
     const body = (await c.req.json().catch(() => ({}))) as { apiKey?: unknown };
@@ -342,12 +354,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return c.json(result);
   });
 
-  api.get('/folders', requireSession, requireAdmin, async (c) => {
+  api.get('/folders', requireSession, async (c) => {
     const raw = c.req.query('path');
     const path = raw ? normalizeDestination(raw) : null;
     if (raw && !path) throw new HttpError(400, 'invalid_request');
     try {
-      const folders = await withNas(c, (client, sid) =>
+      const folders = await nas.run((client, sid) =>
         path ? client.listFolders(sid, path) : client.listShares(sid),
       );
       return c.json({ path, exists: true, folders } satisfies FolderListing);
@@ -358,20 +370,19 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     }
   });
 
-  api.post('/folders', requireSession, requireAdmin, async (c) => {
+  api.post('/folders', requireSession, async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { path?: unknown; name?: unknown };
     const parent = typeof body.path === 'string' ? normalizeDestination(body.path) : null;
     const name = typeof body.name === 'string' ? sanitizeSegment(body.name) : '';
     if (!parent || !name) throw new HttpError(400, 'invalid_request');
     const path = joinPath(parent, name);
-    await withNas(c, (client, sid) => client.createFolders(sid, [path]));
+    await nas.run((client, sid) => client.createFolders(sid, [path]));
     return c.json({ name, path });
   });
 
-  api.get('/jobs', requireSession, (c) => {
-    const owner = c.get('session').username;
-    return c.json({ jobs: jobs.list(owner).map((job) => jobs.toView(job)) });
-  });
+  api.get('/jobs', requireSession, (c) =>
+    c.json({ jobs: jobs.list().map((job) => jobs.toView(job)) }),
+  );
 
   api.post(
     '/jobs',
@@ -383,7 +394,6 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
       },
     }),
     async (c) => {
-      const owner = c.get('session').username;
       let providerId: unknown;
       let categoryId: unknown;
       let magnetInputs: string[];
@@ -420,7 +430,6 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
       const addJob = (debridId: string, name: string) =>
         jobs.toView(
           jobs.create({
-            owner,
             provider: providerId as ProviderId,
             debridId,
             name,
@@ -468,28 +477,27 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
       }
 
       const added = results.filter((result) => result.ok).length;
-      if (added) log.info(`${owner} added ${added} torrent(s) to ${providerId}`);
+      if (added) log.info(`Added ${added} torrent(s) to ${providerId}`);
       return c.json({ results } satisfies AddJobsResponse);
     },
   );
 
   api.post('/jobs/clear', requireSession, (c) => {
-    jobs.clearFinished(c.get('session').username);
+    jobs.clearFinished();
     return c.body(null, 204);
   });
 
   api.post('/jobs/:id/retry', requireSession, (c) => {
-    const job = jobs.retry(c.get('session').username, c.req.param('id'));
+    const job = jobs.retry(c.req.param('id'));
     return c.json(jobs.toView(job));
   });
 
   api.delete('/jobs/:id', requireSession, async (c) => {
-    await jobs.remove(c.get('session').username, c.req.param('id'), c.req.query('cancel') === '1');
+    await jobs.remove(c.req.param('id'), c.req.query('cancel') === '1');
     return c.body(null, 204);
   });
 
   api.get('/events', requireSession, (c) => {
-    const owner = c.get('session').username;
     // Tell reverse proxies (nginx on DSM) not to buffer the stream.
     c.header('X-Accel-Buffering', 'no');
     c.header('Cache-Control', 'no-cache');
@@ -498,8 +506,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
       const send = (event: string, data: unknown) => {
         if (!closed) void stream.writeSSE({ event, data: JSON.stringify(data) });
       };
-      send('snapshot', { jobs: jobs.list(owner).map((job) => jobs.toView(job)) });
-      const unsubscribe = events.subscribe(owner, send);
+      send('snapshot', { jobs: jobs.list().map((job) => jobs.toView(job)) });
+      const unsubscribe = events.subscribe(send);
       const ping = setInterval(() => {
         if (!closed) void stream.write(': ping\n\n');
       }, 20_000);

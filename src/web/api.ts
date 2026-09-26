@@ -5,10 +5,16 @@ import type {
   FolderEntry,
   FolderListing,
   JobView,
+  NasSaveResult,
+  NasUpdate,
+  Outcome,
+  PasswordChange,
   ProviderId,
   ProviderTestResult,
   SessionStatus,
   SettingsUpdate,
+  SetupRequest,
+  SetupResult,
 } from '../shared/types.js';
 
 export class ApiError extends Error {
@@ -62,9 +68,14 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 
 export const api = {
   session: () => request<SessionStatus>('GET', 'session'),
-  login: (body: { username: string; password: string; otp?: string }) =>
+  setup: (body: SetupRequest) => request<SetupResult>('POST', 'setup', body),
+  login: (body: { username: string; password: string }) =>
     request<SessionStatus>('POST', 'login', body),
   logout: () => request<void>('POST', 'logout'),
+  changePassword: (body: PasswordChange) => request<Outcome>('POST', 'account/password', body),
+
+  testNas: () => request<Outcome>('POST', 'nas/test'),
+  saveNas: (body: NasUpdate) => request<NasSaveResult>('PUT', 'nas', body),
 
   settings: () => request<AppSettings>('GET', 'settings'),
   updateSettings: (patch: SettingsUpdate) => request<AppSettings>('PUT', 'settings', patch),

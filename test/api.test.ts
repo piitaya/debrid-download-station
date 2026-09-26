@@ -3,18 +3,19 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Account, type StoredAccount } from '../src/server/account.js';
 import { createApp } from '../src/server/app.js';
 import { createProvider, Providers } from '../src/server/debrid/index.js';
 import { loadEnv } from '../src/server/env.js';
 import { EventHub } from '../src/server/events.js';
 import { JobManager, type JobsFile } from '../src/server/jobs.js';
-import { NasLogins } from '../src/server/nas-logins.js';
+import { NasConnection } from '../src/server/nas-connection.js';
 import { SynologyClient } from '../src/server/nas/synology.js';
 import { RateLimiter } from '../src/server/rate-limit.js';
 import { Sessions, type SessionMap } from '../src/server/sessions.js';
 import { defaultSettings, Settings, type StoredSettings } from '../src/server/settings.js';
 import { JsonFile } from '../src/server/storage.js';
-import type { AddJobsResponse, AppSettings, JobView, SessionStatus } from '../src/shared/types.js';
+import type { AddJobsResponse, AppSettings, JobView } from '../src/shared/types.js';
 import { makeTorrent } from './helpers.js';
 import { createMockServer } from './mocks/server.js';
 import { listen } from './serve.js';
@@ -23,35 +24,38 @@ const mock = createMockServer({ speed: 4 * 1024 * 1024 * 1024 });
 let server: Awaited<ReturnType<typeof listen>>;
 let app: ReturnType<typeof createApp>;
 let jobs: JobManager;
+let accountFile: JsonFile<StoredAccount | null>;
 
 beforeAll(async () => {
   server = await listen(mock.app);
   const dir = mkdtempSync(join(tmpdir(), 'dds-api-'));
   const env = loadEnv({
-    SYNOLOGY_URL: server.url,
     ALLDEBRID_API_URL: `${server.url}/alldebrid`,
     REALDEBRID_API_URL: `${server.url}/realdebrid`,
     TORBOX_API_URL: `${server.url}/torbox`,
     TORBOX_API_KEY: 'from-env',
-    ALLOWED_USERS: 'paul,marie,secure',
     DATA_DIR: dir,
   });
   const settings = new Settings(
     new JsonFile<StoredSettings>(join(dir, 's.json'), defaultSettings),
     env,
   );
+  accountFile = new JsonFile<StoredAccount | null>(join(dir, 'a.json'), () => null);
+  const account = new Account(accountFile);
   const sessions = new Sessions(
     new JsonFile<SessionMap>(join(dir, 'x.json'), () => ({})),
     86_400_000,
   );
   const events = new EventHub();
   const providers = new Providers(settings, env);
-  const nas = new SynologyClient({ baseUrl: env.synologyUrl!, insecureTls: false });
-  const logins = new NasLogins(sessions, () => nas, randomBytes(32));
+  const nas = new NasConnection(
+    settings,
+    randomBytes(32),
+    (url, insecureTls) => new SynologyClient({ baseUrl: url, insecureTls }),
+  );
   jobs = new JobManager({
     file: new JsonFile<JobsFile>(join(dir, 'j.json'), () => ({ jobs: [] })),
     nas,
-    logins,
     events,
     provider: (id) => providers.get(id),
     options: () => ({ createSubfolder: settings.createSubfolder, deleteFromDebrid: false }),
@@ -59,15 +63,15 @@ beforeAll(async () => {
   app = createApp({
     env,
     settings,
+    account,
     sessions,
-    logins,
+    nas,
     jobs,
     events,
-    nas,
     provider: (id) => providers.get(id),
     providerWithKey: (id, key) => createProvider(id, key, env),
-    loginLimiter: new RateLimiter(5, 60_000),
-    globalLoginLimiter: new RateLimiter(20, 60_000),
+    loginLimiter: new RateLimiter(20, 60_000),
+    nasLoginLimiter: new RateLimiter(20, 60_000),
   });
 });
 afterAll(() => server.close());
@@ -106,39 +110,90 @@ function client() {
 
 async function waitFor(check: () => boolean) {
   for (let i = 0; i < 200 && !check(); i++) {
-    for (const job of jobs.list('paul')) job.nextCheckAt = 0;
+    for (const job of jobs.list()) job.nextCheckAt = 0;
     await jobs.tick();
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
 }
 
+/** DSM login of the mock NAS used by the app (2FA: code 123456). */
+const nasLogin = () => ({
+  url: server.url,
+  account: 'secure',
+  password: 'secure',
+  insecureTls: false,
+});
+let password = 'first password';
+
+/** A client signed in to the app. */
+async function signedIn() {
+  const api = client();
+  expect((await api('POST', 'login', { username: 'paul', password })).status).toBe(200);
+  return api;
+}
+
+const dsmLogins = () => mock.dsm.state.calls.filter((call) => call === 'SYNO.API.Auth.login');
+
 describe('HTTP API', () => {
-  it('requires a session and the anti-CSRF header', async () => {
+  it('asks for the setup on the first start', async () => {
     const api = client();
     // Being signed out is an answer (not a failed request in the browser).
-    expect(await api('GET', 'session')).toMatchObject({ status: 200, data: { session: null } });
+    expect(await api('GET', 'session')).toMatchObject({
+      status: 200,
+      data: { session: null, reason: 'setup_required' },
+    });
+    expect((await api('POST', 'login', { username: 'paul', password: 'x' })).data).toEqual({
+      session: null,
+      reason: 'setup_required',
+    });
     expect((await api('GET', 'settings')).status).toBe(401);
     expect((await api('GET', 'health')).data).toMatchObject({ status: 'ok' });
-    const noHeader = await app.request('http://app.test/api/login', {
+    const noHeader = await app.request('http://app.test/api/setup', {
       method: 'POST',
-      body: JSON.stringify({ username: 'paul', password: 'paul' }),
+      body: JSON.stringify({ username: 'paul', password, nas: nasLogin() }),
     });
     expect(noHeader.status).toBe(403);
   });
 
-  it('logs in with the DSM account', async () => {
+  it('creates the account along with a working Download Station login', async () => {
+    const api = client();
+    const setup = (body: object) => api('POST', 'setup', { username: 'Paul', password, ...body });
+
+    expect(
+      await api('POST', 'setup', { username: 'paul', password: 'short', nas: nasLogin() }),
+    ).toMatchObject({ status: 400, data: { error: { code: 'weak_password' } } });
+    // What DSM says is an answer, and no account is made without a working login.
+    expect(await setup({ nas: { ...nasLogin(), password: 'nope' } })).toMatchObject({
+      status: 200,
+      data: { ok: false, error: { code: 'invalid_credentials' } },
+    });
+    expect((await setup({ nas: nasLogin() })).data).toMatchObject({
+      ok: false,
+      error: { code: 'otp_required' },
+    });
+    expect((await api('GET', 'session')).data.reason).toBe('setup_required');
+
+    const done = await setup({ nas: { ...nasLogin(), otp: '123 456' } });
+    expect(done.data).toMatchObject({ ok: true, session: { username: 'Paul' } });
+    expect((await api('GET', 'session')).data.session.username).toBe('Paul');
+    expect((await api('GET', 'settings')).data.nas).toEqual({
+      url: server.url,
+      account: 'secure',
+      insecureTls: false,
+    });
+    // Only once.
+    expect((await setup({ nas: nasLogin() })).status).toBe(403);
+  });
+
+  it('signs in and out with the account', async () => {
     const api = client();
     const wrong = await api('POST', 'login', { username: 'paul', password: 'nope' });
     expect(wrong).toMatchObject({ status: 401, data: { error: { code: 'invalid_credentials' } } });
+    expect((await api('POST', 'login', { username: 'marie', password })).status).toBe(401);
 
-    const notAllowed = await api('POST', 'login', { username: 'admin', password: 'admin' });
-    expect(notAllowed).toMatchObject({ status: 403, data: { error: { code: 'not_allowed' } } });
-
-    const ok = await api('POST', 'login', { username: 'Paul', password: 'paul' });
-    expect(ok.status).toBe(200);
-    expect((ok.data as SessionStatus).session?.user).toEqual({ username: 'paul', isAdmin: true });
-    expect((await api('GET', 'session')).data.session.user.username).toBe('paul');
-
+    expect((await api('POST', 'login', { username: 'PAUL', password })).data).toMatchObject({
+      session: { username: 'Paul' },
+    });
     await api('POST', 'logout');
     expect((await api('GET', 'session')).data).toEqual({ session: null });
   });
@@ -151,40 +206,30 @@ describe('HTTP API', () => {
     expect(ended.jar.get('dds_session')).toBe('');
   });
 
-  it('asks for the 2FA code once per device', async () => {
-    const api = client();
-    const first = await api('POST', 'login', { username: 'secure', password: 'secure' });
-    // The code is the next step, not a failed attempt.
-    expect(first).toMatchObject({ status: 200, data: { session: null, reason: 'otp_required' } });
-    const withCode = await api('POST', 'login', {
-      username: 'secure',
-      password: 'secure',
-      otp: '123 456',
-    });
-    expect(withCode.status).toBe(200);
-    expect(withCode.jar.get('dds_device')).toBeTruthy();
-    // DSM drops the session: the app logs in again as the remembered device, without a code.
-    mock.dsm.expireSessions();
-    expect((await api('GET', 'folders')).status).toBe(200);
-    await api('POST', 'logout');
-    // Remembered device: no code needed any more.
-    expect((await api('POST', 'login', { username: 'secure', password: 'secure' })).status).toBe(
-      200,
-    );
-  });
+  it('changes the password and signs out the other devices', async () => {
+    const phone = await signedIn();
+    const laptop = await signedIn();
+    expect(
+      (await phone('POST', 'account/password', { current: 'nope', password: 'new password' })).data,
+    ).toEqual({ ok: false, error: { code: 'wrong_password' } });
+    expect(
+      (await phone('POST', 'account/password', { current: password, password: 'new' })).data.error
+        .code,
+    ).toBe('weak_password');
 
-  it('keeps settings to DSM administrators', async () => {
-    const marie = client();
-    await marie('POST', 'login', { username: 'marie', password: 'marie' });
-    expect((await marie('GET', 'session')).data.session.user.isAdmin).toBe(false);
-    expect((await marie('GET', 'settings')).status).toBe(200);
-    expect((await marie('PUT', 'settings', { createSubfolder: false })).status).toBe(403);
-    expect((await marie('GET', 'folders')).status).toBe(403);
+    const changed = await phone('POST', 'account/password', {
+      current: password,
+      password: 'new password',
+    });
+    expect(changed.data).toEqual({ ok: true });
+    password = 'new password';
+    expect((await phone('GET', 'settings')).status).toBe(200);
+    expect((await laptop('GET', 'settings')).status).toBe(401);
+    await signedIn();
   });
 
   it('takes a magnet and a .torrent file to Download Station', async () => {
-    const api = client();
-    await api('POST', 'login', { username: 'paul', password: 'paul' });
+    const api = await signedIn();
 
     // Settings: an API key, a category picked from the NAS folders.
     const shares = await api('GET', 'folders');
@@ -239,7 +284,7 @@ describe('HTTP API', () => {
     const upload = (await api('POST', 'jobs', form)).data as AddJobsResponse;
     expect(upload.results.map((r) => r.ok)).toEqual([true, false]);
 
-    await waitFor(() => jobs.list('paul').every((job) => job.status === 'completed'));
+    await waitFor(() => jobs.list().every((job) => job.status === 'completed'));
     const list = (await api('GET', 'jobs')).data.jobs as JobView[];
     const pack = list.find((job) => job.name.startsWith('Sintel'))!;
     const movie = list.find((job) => job.name.startsWith('Big.Buck'))!;
@@ -260,32 +305,96 @@ describe('HTTP API', () => {
     expect((await api('GET', 'jobs')).data.jobs).toEqual([]);
   });
 
-  it('logs in to DSM again when DSM drops the session', async () => {
-    const api = client();
-    await api('POST', 'login', { username: 'paul', password: 'paul' });
-    // DSM drops its sessions after 7 days: the stored login gets a new one, nothing to do.
+  it('keeps the Download Station login going', async () => {
+    const api = await signedIn();
+    // DSM drops its sessions after 7 days: the app logs in again, as a trusted device (2FA).
+    const before = dsmLogins().length;
     mock.dsm.expireSessions();
     expect((await api('GET', 'folders')).status).toBe(200);
+    expect(dsmLogins().length - before).toBe(1);
+    expect((await api('POST', 'nas/test')).data).toEqual({ ok: true });
+  });
 
-    // Until the password changes in DSM: then the user has to log in again.
-    const logins = () => mock.dsm.state.calls.filter((call) => call === 'SYNO.API.Auth.login');
-    const before = logins().length;
-    mock.dsm.users.paul!.password = 'changed';
-    mock.dsm.expireSessions();
+  it('stops at the first login DSM refuses, until Download Station is set up again', async () => {
+    const api = await signedIn();
+    mock.dsm.users.secure!.password = 'changed';
     try {
+      const before = dsmLogins().length;
+      mock.dsm.expireSessions();
       expect(await api('GET', 'folders')).toMatchObject({
-        status: 401,
-        data: { error: { code: 'nas_session_expired' } },
+        status: 503,
+        data: { error: { code: 'nas_login_failed' } },
       });
-      expect((await api('GET', 'settings')).data.error.code).toBe('nas_session_expired');
-      expect((await api('GET', 'session')).data).toEqual({
-        session: null,
-        reason: 'nas_session_expired',
+      // What DSM said, for Settings.
+      expect((await api('POST', 'nas/test')).data).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_credentials' },
       });
-      // The refused login is forgotten: DSM does not see it again (failed logins get IPs blocked).
-      expect(logins().length - before).toBe(1);
+      // Failed logins get the container's IP blocked by DSM: the refused one is not tried again.
+      expect(dsmLogins().length - before).toBe(1);
+      // The app stays usable.
+      expect((await api('GET', 'settings')).status).toBe(200);
+
+      // The new password, entered in Settings. Still a trusted device: no 2FA code.
+      expect(await api('PUT', 'nas', { ...nasLogin(), password: 'nope' })).toMatchObject({
+        status: 200,
+        data: { ok: false, error: { code: 'invalid_credentials' } },
+      });
+      const saved = await api('PUT', 'nas', { ...nasLogin(), password: 'changed' });
+      expect(saved.data).toMatchObject({ ok: true, settings: { nas: { account: 'secure' } } });
+      expect((await api('GET', 'folders')).status).toBe(200);
     } finally {
-      mock.dsm.users.paul!.password = 'paul';
+      mock.dsm.users.secure!.password = 'secure';
     }
+  });
+
+  it('checks a new Download Station login before saving it', async () => {
+    const api = await signedIn();
+    expect((await api('PUT', 'nas', { url: server.url, account: 'paul' })).status).toBe(400);
+    mock.dsm.users.paul!.fileStation = false;
+    try {
+      expect(
+        (await api('PUT', 'nas', { url: server.url, account: 'paul', password: 'paul' })).data,
+      ).toMatchObject({ ok: false, error: { code: 'file_station_denied' } });
+    } finally {
+      delete mock.dsm.users.paul!.fileStation;
+    }
+    // Nothing changed.
+    expect((await api('GET', 'settings')).data.nas.account).toBe('secure');
+    const saved = await api('PUT', 'nas', {
+      url: `${server.url}/`,
+      account: 'paul',
+      password: 'paul',
+    });
+    expect(saved.data.settings.nas).toEqual({
+      url: server.url,
+      account: 'paul',
+      insecureTls: false,
+    });
+  });
+
+  it('starts over once the account is reset, with a working DSM login', async () => {
+    const api = await signedIn();
+    const other = await signedIn();
+    // account.json deleted, then the container restarted.
+    accountFile.data = null;
+    expect((await api('GET', 'settings')).status).toBe(401);
+    expect((await api('GET', 'session')).data).toEqual({
+      session: null,
+      reason: 'setup_required',
+    });
+    // Taking the app over needs a DSM login of the NAS.
+    const setup = (nas: object) =>
+      api('POST', 'setup', { username: 'someone', password: 'another password', nas });
+    expect((await setup({ ...nasLogin(), account: 'paul', password: 'guess' })).data).toMatchObject(
+      { ok: false, error: { code: 'invalid_credentials' } },
+    );
+    expect((await setup({ ...nasLogin(), account: 'paul', password: 'paul' })).data).toMatchObject({
+      ok: true,
+      session: { username: 'someone' },
+    });
+    expect((await client()('POST', 'login', { username: 'paul', password })).status).toBe(401);
+    // The devices of the previous account are signed out.
+    expect((await other('GET', 'settings')).status).toBe(401);
   });
 });

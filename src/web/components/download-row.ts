@@ -22,7 +22,7 @@ export function statusTone(job: JobView): StatusTone {
   switch (job.status) {
     case 'completed':
       return 'success';
-    case 'waiting_login':
+    case 'waiting_nas':
       return 'warning';
     case 'error':
       return 'danger';
@@ -57,8 +57,8 @@ export function statusParts(job: JobView, { reason = true }: StatusOptions = {})
     case 'sending':
       parts = [t('status.sending')];
       break;
-    case 'waiting_login':
-      parts = [t('status.waitingLogin')];
+    case 'waiting_nas':
+      parts = [t('status.waitingNas')];
       break;
     case 'downloading': {
       const total = job.files.length;
@@ -105,11 +105,11 @@ export const statusLabel = (job: JobView, options?: StatusOptions): string =>
 
 /**
  * Progress bar of a running job: a fraction, 'indeterminate', or null when it has none.
- * A job waiting for the owner to sign in again gets a still bar: nothing is moving.
+ * A job waiting for Download Station gets a still bar: nothing is moving.
  */
 export function jobProgress(job: JobView): number | 'indeterminate' | null {
   if (!isActiveJob(job)) return null;
-  if (job.status === 'waiting_login') return job.progress ?? 0;
+  if (job.status === 'waiting_nas') return job.progress ?? 0;
   if (job.status === 'sending' || job.progress === null) return 'indeterminate';
   return job.progress;
 }

@@ -27,8 +27,6 @@ export interface LoginResult {
   sid: string;
   /** Device token returned when logging in with a 2FA code. */
   deviceId: string | null;
-  /** Whether the user manages Download Station (DSM administrators). */
-  isManager: boolean;
 }
 
 /** Thrown when DSM no longer accepts a session id. */
@@ -45,6 +43,8 @@ export interface NasClient {
   logout(sid: string): Promise<void>;
   /** Throws NasSessionError when the session is no longer valid. */
   checkSession(sid: string): Promise<void>;
+  /** Throws `file_station_denied` when the account may not use File Station. */
+  checkFileStation(sid: string): Promise<void>;
 
   /** Creates folders (Download Station paths such as `video/Films/Show`) and their parents. */
   createFolders(sid: string, paths: string[]): Promise<void>;

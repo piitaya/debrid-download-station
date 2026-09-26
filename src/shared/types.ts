@@ -44,7 +44,25 @@ export interface ProviderState {
   fromEnv: boolean;
 }
 
+/** Connection to Download Station: the DSM account the downloads are made with. */
+export interface NasSettings {
+  /** DSM address as seen from the container (`http://192.168.1.10:5000`). */
+  url: string;
+  account: string;
+  /** Accept a self-signed certificate (HTTPS). */
+  insecureTls: boolean;
+}
+
+/** New connection to Download Station: it is tested (a DSM login) before being saved. */
+export interface NasUpdate extends NasSettings {
+  password: string;
+  /** 2FA code, when DSM asks for it (once: the app then is a trusted device). */
+  otp?: string;
+}
+
 export interface AppSettings {
+  /** Null until Download Station is set up. */
+  nas: NasSettings | null;
   providers: ProviderState[];
   defaultProvider: ProviderId | null;
   categories: Category[];
@@ -66,21 +84,41 @@ export interface SettingsUpdate {
 }
 
 export interface SessionInfo {
-  user: { username: string; isAdmin: boolean };
-  nasUrl: string;
+  username: string;
   version: string;
 }
 
 /**
- * Answer of GET /api/session and POST /api/login. Being signed out, or asked for the 2FA code,
- * is an answer and not an error: the browser does not report it as a failed request.
+ * Answer of GET /api/session and POST /api/login. Being signed out is an answer and not an
+ * error: the browser does not report it as a failed request.
  */
 export interface SessionStatus {
-  /** Null when signed out, or while the login waits for the 2FA code. */
   session: SessionInfo | null;
-  /** Why there is no session: it ended, or the login needs the 2FA code. */
-  reason?: 'unauthorized' | 'nas_session_expired' | 'otp_required';
+  /** Why there is no session: it ended, or the app has no account yet (first start). */
+  reason?: 'unauthorized' | 'setup_required';
 }
+
+/** First start: the app's account, and the connection to Download Station. */
+export interface SetupRequest {
+  username: string;
+  password: string;
+  nas: NasUpdate;
+}
+
+/** Shortest password of the app's account. */
+export const MIN_PASSWORD_LENGTH = 8;
+
+export interface PasswordChange {
+  current: string;
+  password: string;
+}
+
+/**
+ * Answer of an action whose failure is an expected outcome (a refused API key or DSM login, a
+ * wrong password), not an HTTP error.
+ */
+export type Outcome<T extends object = object> =
+  ({ ok: true } & T) | { ok: false; error: ErrorInfo };
 
 export interface ProviderAccount {
   username: string;
@@ -89,9 +127,12 @@ export interface ProviderAccount {
   premiumUntil: number | null;
 }
 
-/** Answer of POST /api/providers/:id/test: a refused key is an answer, not an error. */
-export type ProviderTestResult =
-  { ok: true; account: ProviderAccount } | { ok: false; error: ErrorInfo };
+/** POST /api/providers/:id/test */
+export type ProviderTestResult = Outcome<{ account: ProviderAccount }>;
+/** POST /api/setup: signed in once the account is created. */
+export type SetupResult = Outcome<{ session: SessionInfo }>;
+/** PUT /api/nas */
+export type NasSaveResult = Outcome<{ settings: AppSettings }>;
 
 export interface FolderEntry {
   name: string;
@@ -108,21 +149,27 @@ export interface FolderListing {
 }
 
 export type ErrorCode =
-  // Session / login
+  // App account
   | 'unauthorized'
-  | 'nas_session_expired'
   | 'invalid_credentials'
+  | 'wrong_password'
+  | 'weak_password'
+  | 'too_many_attempts'
+  // DSM login
   | 'otp_required'
   | 'otp_invalid'
   | 'otp_setup_required'
-  | 'not_allowed'
   | 'no_permission'
+  | 'file_station_denied'
   | 'account_disabled'
   | 'password_expired'
   | 'ip_blocked'
-  | 'too_many_attempts'
-  | 'nas_unreachable'
+  // NAS
   | 'nas_not_configured'
+  | 'nas_login_failed'
+  | 'nas_session_expired'
+  | 'nas_unreachable'
+  | 'nas_certificate'
   | 'nas_error'
   | 'download_station_unavailable'
   // Generic
@@ -165,8 +212,8 @@ export type JobStatus =
   | 'debrid'
   /** Links are being unlocked and sent to Download Station. */
   | 'sending'
-  /** The NAS session expired: waits for the owner to log in again. */
-  | 'waiting_login'
+  /** Download Station refuses the stored login: waits for its settings to be fixed. */
+  | 'waiting_nas'
   /** Download Station is downloading the files. */
   | 'downloading'
   | 'completed'
@@ -176,7 +223,7 @@ export type JobStatus =
 export const ACTIVE_JOB_STATUSES: readonly JobStatus[] = [
   'debrid',
   'sending',
-  'waiting_login',
+  'waiting_nas',
   'downloading',
 ];
 

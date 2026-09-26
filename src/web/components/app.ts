@@ -18,6 +18,7 @@ import './icon.js';
 import './login-page.js';
 import './logo.js';
 import './settings-page.js';
+import './setup-page.js';
 import { sharedStyles } from './styles.js';
 
 type Route = 'downloads' | 'settings';
@@ -159,7 +160,11 @@ export class DdsApp extends LitElement {
       </div>`;
     }
     if (!store.session) {
-      return html`<dds-login-page></dds-login-page>${this.renderToasts()}`;
+      return html`${
+        store.setupRequired
+          ? html`<dds-setup-page></dds-setup-page>`
+          : html`<dds-login-page></dds-login-page>`
+      }${this.renderToasts()}`;
     }
 
     const settings = this.route === 'settings';

@@ -1,9 +1,9 @@
 // Runs the whole app against the fake NAS and debrid services, with sample settings and
 // downloads, for UI work: web app with hot reload, API server, mocks.
 //
-//   npm run demo                    → http://localhost:5173 (log in with paul / paul)
+//   npm run demo                    → http://localhost:5173 (sign in with demo / demo1234)
 //   DEMO_PORT=5300 npm run demo     → web on 5300, API on 5301, mocks on 5302
-//   DEMO_SEED=0 npm run demo        → no sample downloads
+//   DEMO_SEED=0 npm run demo        → first start: no account, no sample downloads
 import { serve } from '@hono/node-server';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -45,7 +45,6 @@ const api = spawn('npx', ['tsx', 'src/server/index.ts'], {
     PORT: String(apiPort),
     HOST: '127.0.0.1',
     DATA_DIR: dataDir,
-    SYNOLOGY_URL: mockUrl,
     ALLDEBRID_API_URL: `${mockUrl}/alldebrid`,
     REALDEBRID_API_URL: `${mockUrl}/realdebrid`,
     TORBOX_API_URL: `${mockUrl}/torbox`,
@@ -73,12 +72,17 @@ async function waitForApi(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  const login = await fetch(`${apiUrl}/api/login`, {
+  // First start, as done in the app: the account, and Download Station on the fake NAS.
+  const setup = await fetch(`${apiUrl}/api/setup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'dds' },
-    body: JSON.stringify({ username: 'paul', password: 'paul' }),
+    body: JSON.stringify({
+      username: 'demo',
+      password: 'demo1234',
+      nas: { url: mockUrl, account: 'syno-debrid', password: 'syno-debrid', insecureTls: false },
+    }),
   });
-  const cookie = login.headers
+  const cookie = setup.headers
     .getSetCookie()
     .map((c) => c.split(';')[0])
     .join('; ');
@@ -104,8 +108,13 @@ async function seed(): Promise<void> {
 }
 
 await waitForApi();
-if (process.env.DEMO_SEED !== '0') await seed();
-console.log(`\n  Demo: http://localhost:${webPort}  (paul / paul, admin; marie / marie)\n`);
+const seeded = process.env.DEMO_SEED !== '0';
+if (seeded) await seed();
+console.log(
+  seeded
+    ? `\n  Demo: http://localhost:${webPort}  (demo / demo1234)\n`
+    : `\n  Demo: http://localhost:${webPort}  (fake NAS: ${mockUrl}, syno-debrid / syno-debrid)\n`,
+);
 
 const stop = () => {
   api.kill('SIGTERM');

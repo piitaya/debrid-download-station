@@ -12,10 +12,9 @@ import type { DebridProvider } from './debrid/types.js';
 import { AppError, toErrorInfo } from './errors.js';
 import type { EventHub } from './events.js';
 import { log } from './logger.js';
-import type { DsTask, NasClient } from './nas/types.js';
-import { NasSessionError } from './nas/types.js';
+import { NasLoginError, type NasConnection } from './nas-connection.js';
+import { NasSessionError, type DsTask } from './nas/types.js';
 import { basename, dirname, isPlainName, joinPath, planDownload } from './paths.js';
-import type { NasLogins } from './nas-logins.js';
 import type { JsonFile } from './storage.js';
 
 export interface JobFile {
@@ -34,7 +33,6 @@ export interface JobFile {
 
 export interface Job {
   id: string;
-  owner: string;
   provider: ProviderId;
   debridId: string;
   name: string;
@@ -67,7 +65,6 @@ export interface JobsFile {
 }
 
 export interface NewJob {
-  owner: string;
   provider: ProviderId;
   debridId: string;
   name: string;
@@ -76,8 +73,7 @@ export interface NewJob {
 
 export interface JobDeps {
   file: JsonFile<JobsFile>;
-  nas: NasClient;
-  logins: NasLogins;
+  nas: NasConnection;
   events: EventHub;
   provider: (id: ProviderId) => DebridProvider;
   options: () => { createSubfolder: boolean; deleteFromDebrid: boolean };
@@ -85,7 +81,7 @@ export interface JobDeps {
 
 const TICK_MS = 1000;
 const MAX_FAILURES = 30;
-const MAX_JOBS_PER_USER = 300;
+const MAX_JOBS = 300;
 const FINISHED_RETENTION_MS = 30 * 24 * 3600 * 1000;
 
 /** Errors worth retrying later (network hiccups, rate limits, busy services). */
@@ -117,6 +113,10 @@ export class JobManager {
   private readonly busy = new Set<string>();
 
   constructor(private readonly deps: JobDeps) {
+    for (const job of this.jobs) {
+      // Saved by an earlier version, which waited for the user to log in to DSM again.
+      if ((job.status as string) === 'waiting_login') job.status = 'waiting_nas';
+    }
     this.prune();
   }
 
@@ -133,12 +133,12 @@ export class JobManager {
     this.timer = null;
   }
 
-  list(owner: string): Job[] {
-    return this.jobs.filter((job) => job.owner === owner);
+  list(): Job[] {
+    return this.jobs;
   }
 
-  get(owner: string, id: string): Job {
-    const job = this.jobs.find((item) => item.id === id && item.owner === owner);
+  get(id: string): Job {
+    const job = this.jobs.find((item) => item.id === id);
     if (!job) throw new AppError('not_found');
     return job;
   }
@@ -147,7 +147,6 @@ export class JobManager {
     const now = Date.now();
     const job: Job = {
       id: randomUUID(),
-      owner: input.owner,
       provider: input.provider,
       debridId: input.debridId,
       name: input.name,
@@ -176,8 +175,8 @@ export class JobManager {
     return job;
   }
 
-  retry(owner: string, id: string): Job {
-    const job = this.get(owner, id);
+  retry(id: string): Job {
+    const job = this.get(id);
     if (job.status !== 'error') return job;
     job.error = null;
     job.failures = 0;
@@ -185,10 +184,9 @@ export class JobManager {
     if (job.phase === 'downloading') {
       // Failed files get a fresh link: debrid links may have expired.
       const failed = job.files.filter((file) => file.status === 'error');
-      const sid = this.deps.logins.currentSid(owner);
       const ids = failed.map((file) => file.taskId).filter((taskId): taskId is string => !!taskId);
-      if (sid && ids.length) {
-        this.deps.nas.deleteTasks(sid, ids).catch(() => undefined);
+      if (ids.length) {
+        this.deps.nas.run((client, sid) => client.deleteTasks(sid, ids)).catch(() => undefined);
       }
       for (const file of failed) {
         Object.assign(file, {
@@ -209,40 +207,41 @@ export class JobManager {
   }
 
   /** Removes a job. With `cancel`, also stops it on the debrid service and Download Station. */
-  async remove(owner: string, id: string, cancel: boolean): Promise<void> {
-    const job = this.get(owner, id);
+  async remove(id: string, cancel: boolean): Promise<void> {
+    const job = this.get(id);
     this.deps.file.data.jobs = this.jobs.filter((item) => item !== job);
     this.deps.file.save();
-    this.deps.events.emit(owner, 'job-removed', { id });
+    this.deps.events.emit('job-removed', { id });
 
     if (!cancel) return;
-    const sid = await this.deps.logins.sidFor(owner);
     const running = job.files
       .filter((file) => file.taskId && file.status !== 'completed')
       .map((file) => file.taskId!);
-    if (sid && running.length) {
+    if (running.length) {
       await this.deps.nas
-        .deleteTasks(sid, running)
-        .catch((error: unknown) => log.warn(`Could not delete Download Station tasks`, error));
+        .run((client, sid) => client.deleteTasks(sid, running))
+        .catch((error: unknown) =>
+          log.warn(`Could not delete Download Station tasks`, toErrorInfo(error)),
+        );
     }
     await this.deleteFromDebrid(job);
   }
 
   /** Removes completed and cancelled jobs (failed ones stay, to be retried or removed). */
-  clearFinished(owner: string): void {
+  clearFinished(): void {
     const removed = this.jobs.filter(
-      (job) => job.owner === owner && (job.status === 'completed' || job.status === 'cancelled'),
+      (job) => job.status === 'completed' || job.status === 'cancelled',
     );
     if (!removed.length) return;
     this.deps.file.data.jobs = this.jobs.filter((job) => !removed.includes(job));
     this.deps.file.save();
-    for (const job of removed) this.deps.events.emit(owner, 'job-removed', { id: job.id });
+    for (const job of removed) this.deps.events.emit('job-removed', { id: job.id });
   }
 
-  /** Resumes jobs blocked on a NAS session once their owner logs in again. */
-  resumeFor(owner: string): void {
+  /** Runs the waiting jobs now, e.g. once Download Station is set up again. */
+  resume(): void {
     for (const job of this.jobs) {
-      if (job.owner === owner && isActive(job)) job.nextCheckAt = Date.now();
+      if (isActive(job)) job.nextCheckAt = Date.now();
     }
   }
 
@@ -282,18 +281,16 @@ export class JobManager {
     if (!this.jobs.includes(job)) return;
     job.updatedAt = Date.now();
     this.deps.file.save();
-    this.deps.events.emit(job.owner, 'job', this.toView(job));
+    this.deps.events.emit('job', this.toView(job));
   }
 
   private prune(): void {
     const now = Date.now();
-    const counts = new Map<string, number>();
+    let count = 0;
     const kept = this.jobs.filter((job) => {
       if (isActive(job)) return true;
       if (job.finishedAt && now - job.finishedAt > FINISHED_RETENTION_MS) return false;
-      const count = (counts.get(job.owner) ?? 0) + 1;
-      counts.set(job.owner, count);
-      return count <= MAX_JOBS_PER_USER;
+      return ++count <= MAX_JOBS;
     });
     if (kept.length !== this.jobs.length) {
       this.deps.file.data.jobs = kept;
@@ -317,7 +314,7 @@ export class JobManager {
     this.busy.add(job.id);
     try {
       if (job.status === 'debrid') await this.checkDebrid(job);
-      if (job.status === 'sending' || job.status === 'waiting_login') await this.send(job);
+      if (job.status === 'sending' || job.status === 'waiting_nas') await this.send(job);
       else if (job.status === 'downloading') await this.checkDownloads(job);
       job.failures = 0;
     } catch (error) {
@@ -328,12 +325,19 @@ export class JobManager {
   }
 
   private handleError(job: Job, error: unknown): void {
+    if (error instanceof NasLoginError) {
+      // Waits for Download Station's settings to be fixed. Meanwhile, Download Station goes on
+      // with the files it already has.
+      if (job.status === 'sending') {
+        job.status = 'waiting_nas';
+        this.changed(job);
+      }
+      job.nextCheckAt = Date.now() + 30_000;
+      return;
+    }
     if (error instanceof NasSessionError) {
-      // Logs in to DSM again when the password is kept; the job retries in a moment.
-      void this.deps.logins.expired(error.sid);
-      if (job.status === 'sending') job.status = 'waiting_login';
+      // DSM dropped the new session too: tried again in a moment.
       job.nextCheckAt = Date.now() + 5000;
-      this.changed(job);
       return;
     }
     const info = toErrorInfo(error);
@@ -359,8 +363,8 @@ export class JobManager {
   }
 
   /** Polls faster when someone is looking at the app. */
-  private delay(job: Job, idle: number, watched: number): number {
-    return this.deps.events.isWatching(job.owner) ? watched : idle;
+  private delay(idle: number, watched: number): number {
+    return this.deps.events.isWatching() ? watched : idle;
   }
 
   private async checkDebrid(job: Job): Promise<void> {
@@ -388,21 +392,15 @@ export class JobManager {
     }
     const age = Date.now() - job.createdAt;
     const idle = age < 120_000 ? 3000 : age < 600_000 ? 10_000 : 30_000;
-    job.nextCheckAt = Date.now() + this.delay(job, idle, Math.min(idle, 4000));
+    job.nextCheckAt = Date.now() + this.delay(idle, Math.min(idle, 4000));
     this.changed(job);
   }
 
   private async send(job: Job): Promise<void> {
-    const sid = await this.deps.logins.sidFor(job.owner);
-    if (!sid) {
-      if (job.status !== 'waiting_login') {
-        job.status = 'waiting_login';
-        this.changed(job);
-      }
-      job.nextCheckAt = Date.now() + 10_000;
-      return;
-    }
-    if (job.status === 'waiting_login') {
+    const nas = this.deps.nas;
+    // Links are only unlocked once Download Station can take them.
+    await nas.session();
+    if (job.status === 'waiting_nas') {
       job.status = 'sending';
       this.changed(job);
     }
@@ -428,7 +426,7 @@ export class JobManager {
     const pending = job.files.filter((file) => file.status === 'pending');
     const folderOf = (file: JobFile) => joinPath(job.destination, dirname(file.path));
     const folders = [...new Set(pending.map(folderOf))].filter((f) => f !== job.destination);
-    if (folders.length) await this.deps.nas.createFolders(sid, folders);
+    if (folders.length) await nas.run((client, sid) => client.createFolders(sid, folders));
 
     // One file at a time: links are generated just before Download Station gets them, and
     // what was already sent is kept if something fails halfway.
@@ -440,7 +438,9 @@ export class JobManager {
         size: file.size,
         ref: file.ref,
       });
-      const [taskId] = await this.deps.nas.createDownloadTasks(sid, [url], folderOf(file));
+      const [taskId] = await nas.run((client, sid) =>
+        client.createDownloadTasks(sid, [url], folderOf(file)),
+      );
       file.url = url;
       file.taskId = taskId ?? null;
       file.status = 'queued';
@@ -455,25 +455,20 @@ export class JobManager {
   }
 
   private async checkDownloads(job: Job): Promise<void> {
-    const sid = await this.deps.logins.sidFor(job.owner);
-    if (!sid) {
-      // Download Station keeps downloading; progress resumes once the user logs in again.
-      job.nextCheckAt = Date.now() + 30_000;
-      return;
-    }
+    const nas = this.deps.nas;
     // Download Station did not return some task ids: find them by URL.
     const unmatched = job.files.filter(
       (file) => !file.taskId && file.url && file.status !== 'completed',
     );
     if (unmatched.length) {
-      const byUrl = new Map(
-        (await this.deps.nas.listTasks(sid)).map((task) => [task.uri, task.id]),
-      );
+      const listed = await nas.run((client, sid) => client.listTasks(sid));
+      const byUrl = new Map(listed.map((task) => [task.uri, task.id]));
       for (const file of unmatched) file.taskId = byUrl.get(file.url) ?? null;
     }
 
     const ids = job.files.map((file) => file.taskId).filter((id): id is string => !!id);
-    const tasks = new Map((await this.deps.nas.getTasks(sid, ids)).map((task) => [task.id, task]));
+    const found = await nas.run((client, sid) => client.getTasks(sid, ids));
+    const tasks = new Map(found.map((task) => [task.id, task]));
 
     for (const file of job.files) {
       const task = file.taskId ? tasks.get(file.taskId) : undefined;
@@ -485,8 +480,7 @@ export class JobManager {
       }
       const wasCompleted = file.status === 'completed';
       file.status = fileStatusFromTask(task);
-      if (file.status === 'completed' && !wasCompleted)
-        await this.fixFileName(job, sid, file, task);
+      if (file.status === 'completed' && !wasCompleted) await this.fixFileName(job, file, task);
       file.downloaded = file.status === 'completed' ? file.size || task.size : task.downloaded;
       file.speed = file.status === 'downloading' ? task.speed : 0;
       file.error = task.error;
@@ -520,12 +514,12 @@ export class JobManager {
       return;
     }
 
-    job.nextCheckAt = Date.now() + this.delay(job, 20_000, 2500);
+    job.nextCheckAt = Date.now() + this.delay(20_000, 2500);
     this.changed(job);
   }
 
   /** Gives the file its expected name when Download Station picked another one. */
-  private async fixFileName(job: Job, sid: string, file: JobFile, task: DsTask): Promise<void> {
+  private async fixFileName(job: Job, file: JobFile, task: DsTask): Promise<void> {
     const expected = basename(file.path);
     if (!task.title || task.title === expected) return;
     // The name comes from Download Station: a path in it would point outside the folder.
@@ -533,9 +527,9 @@ export class JobManager {
       log.warn(`Not renaming "${task.title}": not a plain file name`);
       return;
     }
-    const folder = joinPath(job.destination, dirname(file.path));
+    const path = joinPath(job.destination, dirname(file.path), task.title);
     try {
-      await this.deps.nas.rename(sid, joinPath(folder, task.title), expected);
+      await this.deps.nas.run((client, sid) => client.rename(sid, path, expected));
     } catch (error) {
       log.warn(`Could not rename "${task.title}" to "${expected}"`, toErrorInfo(error));
     }

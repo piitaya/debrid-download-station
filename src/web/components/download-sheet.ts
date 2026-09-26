@@ -129,6 +129,17 @@ export class DdsDownloadSheet extends LitElement {
           ${renderProgress(job)}
         </div>
         ${
+          job.status === 'waiting_nas'
+            ? html`<div class="notice neutral">
+                <dds-icon class="warning-text" .path=${mdiAlertCircleOutline}></dds-icon>
+                <div class="notice-text">
+                  <p>${t('downloads.waitingNas')}</p>
+                  <a href="#/settings" @click=${() => this.sheet.close()}>${t('setup.open')}</a>
+                </div>
+              </div>`
+            : nothing
+        }
+        ${
           job.error
             ? html`<div class="notice">
                 <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
@@ -298,10 +309,20 @@ export class DdsDownloadSheet extends LitElement {
         color: var(--text-secondary);
       }
 
+      .notice.neutral {
+        color: var(--text-secondary);
+        background: var(--bg-elevated);
+      }
+
       .notice-text {
         display: grid;
         gap: 2px;
         min-width: 0;
+      }
+
+      .notice-text a {
+        justify-self: start;
+        font-weight: 600;
       }
 
       .notice .raw {

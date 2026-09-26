@@ -1,6 +1,6 @@
 /**
- * Counts failed attempts per key (client IP) in a sliding window. Protects the login form, and
- * the NAS itself: DSM auto-block would otherwise ban the container's IP for everyone.
+ * Counts failed attempts per key (client IP, or '*' for all) in a sliding window. Protects the
+ * sign-in form, and the NAS itself: DSM auto-block would ban the container's IP.
  */
 export class RateLimiter {
   private readonly attempts = new Map<string, number[]>();

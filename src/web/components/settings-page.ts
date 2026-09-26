@@ -13,11 +13,22 @@ import {
 import { api } from '../api.js';
 import { breakable } from '../format.js';
 import { errorMessage, t } from '../i18n.js';
-import { categoryIcon, mdiArrowDown, mdiArrowUp, mdiChevronRight, mdiPlus } from '../icons.js';
+import {
+  categoryIcon,
+  mdiArrowDown,
+  mdiArrowUp,
+  mdiChevronRight,
+  mdiNas,
+  mdiPlus,
+} from '../icons.js';
 import { store, StoreController } from '../store.js';
 import type { DdsDestinationSheet } from './destination-sheet.js';
 import './destination-sheet.js';
 import './icon.js';
+import { checkNas, type DdsNasSheet, type NasCheck } from './nas-sheet.js';
+import './nas-sheet.js';
+import type { DdsPasswordSheet } from './password-sheet.js';
+import './password-sheet.js';
 import {
   checkProvider,
   errorInfo,
@@ -40,14 +51,19 @@ const initials = (name: string) => (name.match(/[A-Z]/g) ?? [name]).join('').sli
 export class DdsSettingsPage extends LitElement {
   /** Account check of each configured provider. */
   @state() private checks: Partial<Record<ProviderId, ProviderCheck>> = {};
+  /** Check of the connection to Download Station. */
+  @state() private nasCheck: NasCheck | null = null;
   /** Destinations are being reordered. */
   @state() private reordering = false;
 
   @query('dds-provider-sheet') private providerSheet!: DdsProviderSheet;
   @query('dds-destination-sheet') private destinationSheet!: DdsDestinationSheet;
+  @query('dds-nas-sheet') private nasSheet!: DdsNasSheet;
+  @query('dds-password-sheet') private passwordSheet!: DdsPasswordSheet;
 
   /** Outdates a check still in flight when the provider sheet reports a newer one. */
   private checkRuns: Partial<Record<ProviderId, number>> = {};
+  private nasCheckRun = 0;
   /** In-place changes are sent one after the other. */
   private saves: Promise<void> = Promise.resolve();
   private pendingSaves = 0;
@@ -59,6 +75,7 @@ export class DdsSettingsPage extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this.checkNas();
     this.checkProviders();
   }
 
@@ -67,8 +84,22 @@ export class DdsSettingsPage extends LitElement {
     this.reordering = false;
   }
 
+  private checkNas(): void {
+    if (!store.settings?.nas) return;
+    const run = ++this.nasCheckRun;
+    this.nasCheck = { status: 'checking' };
+    void checkNas().then((check) => {
+      if (this.nasCheckRun === run) this.nasCheck = check;
+    });
+  }
+
+  private onNasChecked(event: CustomEvent<NasCheck>): void {
+    this.nasCheckRun++;
+    this.nasCheck = event.detail;
+  }
+
   private checkProviders(): void {
-    if (!store.session?.user.isAdmin || !store.settings) return;
+    if (!store.settings) return;
     for (const { id, configured } of store.settings.providers) {
       if (!configured) continue;
       const run = (this.checkRuns[id] = (this.checkRuns[id] ?? 0) + 1);
@@ -147,26 +178,57 @@ export class DdsSettingsPage extends LitElement {
   override render() {
     const { session, settings } = store;
     if (!session || !settings) return nothing;
-    const admin = session.user.isAdmin;
 
     return html`
-      ${
-        admin
-          ? html`${this.renderServices(settings)} ${this.renderDestinations(settings)}
-            ${this.renderDownloading(settings)}`
-          : html`<p class="note">${t('settings.adminOnly')}</p>`
-      }
+      ${this.renderNas(settings)} ${this.renderServices(settings)}
+      ${this.renderDestinations(settings)} ${this.renderDownloading(settings)}
       ${this.renderAccount(session)}
       <p class="about">${t('app.name')} · ${t('settings.version', { version: session.version })}</p>
-      ${
-        admin
-          ? html`<dds-provider-sheet
-                @dds-provider-checked=${this.onProviderChecked}
-              ></dds-provider-sheet>
-              <dds-destination-sheet></dds-destination-sheet>`
-          : nothing
-      }
+      <dds-nas-sheet @dds-nas-checked=${this.onNasChecked}></dds-nas-sheet>
+      <dds-provider-sheet @dds-provider-checked=${this.onProviderChecked}></dds-provider-sheet>
+      <dds-destination-sheet></dds-destination-sheet>
+      <dds-password-sheet></dds-password-sheet>
     `;
+  }
+
+  private renderNas(settings: AppSettings) {
+    const { nas } = settings;
+    const check = nas ? this.nasCheck : null;
+    const lines = nas ? [nas.account, nas.url] : [];
+    if (check?.status === 'error') lines.push(errorMessage(check.error.code).replace(/\.$/, ''));
+    const [value, tone] = !nas
+      ? [t('provider.notConfigured'), 'off']
+      : check?.status === 'ok'
+        ? [t('provider.connected'), 'ok']
+        : check?.status === 'error'
+          ? [t('provider.error'), 'bad']
+          : [t('provider.checking'), ''];
+
+    return html`<section class="section">
+      <h2 class="section-header">${t('settings.nas')}</h2>
+      <div class="group with-icons">
+        <button
+          class="row ${lines.length ? 'multiline' : ''}"
+          @click=${() => this.nasSheet.open(this.nasCheck)}
+        >
+          <span class="row-icon"><dds-icon .path=${mdiNas}></dds-icon></span>
+          <span class="row-main">
+            <span class="title-line">
+              <span class="row-title">${t('nas.title')}</span>
+              <span class="row-value ${tone}">${value}</span>
+            </span>
+            ${
+              lines.length
+                ? html`<span class="row-subtitle details wrap">
+                    ${lines.map((line) => html`<span>${line}</span>`)}
+                  </span>`
+                : nothing
+            }
+          </span>
+          <dds-icon class="chevron" .path=${mdiChevronRight}></dds-icon>
+        </button>
+      </div>
+    </section>`;
   }
 
   private renderServices(settings: AppSettings) {
@@ -362,11 +424,13 @@ export class DdsSettingsPage extends LitElement {
           <div class="row">
             <span class="row-main">
               <span class="row-title wrap">
-                ${t('settings.signedInAs', { user: session.user.username })}
+                ${t('settings.signedInAs', { user: session.username })}
               </span>
-              <span class="row-subtitle mono wrap">${session.nasUrl}</span>
             </span>
           </div>
+          <button class="row accent" @click=${() => this.passwordSheet.open()}>
+            ${t('settings.changePassword')}
+          </button>
           ${
             canHandleMagnets
               ? html`<button class="row accent" @click=${this.registerMagnetHandler}>
@@ -394,13 +458,6 @@ export class DdsSettingsPage extends LitElement {
 
       .section-header h2 {
         font: inherit;
-      }
-
-      .note {
-        margin-bottom: 20px;
-        padding: 0 16px;
-        font-size: 13px;
-        color: var(--text-secondary);
       }
 
       .initials {

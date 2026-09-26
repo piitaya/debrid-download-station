@@ -9,6 +9,7 @@ const dsm = createMockDsm({
   users: {
     admin: { password: 'secret pass', isManager: true },
     bob: { password: 'bob', otp: '123456' },
+    eve: { password: 'eve', fileStation: false },
   },
   folders: ['/video', '/video/Séries', '/music'],
 });
@@ -31,11 +32,16 @@ const errorCode = async (promise: Promise<unknown>) => {
 };
 
 describe('SynologyClient', () => {
-  it('logs in (passwords with spaces) and reports manager status', async () => {
+  it('logs in (passwords with spaces)', async () => {
     const result = await client.login({ account: 'admin', password: 'secret pass' });
     expect(result.sid).toMatch(/^sid-/);
-    expect(result.isManager).toBe(true);
     await client.checkSession(result.sid);
+    await client.checkFileStation(result.sid);
+  });
+
+  it('tells an account without File Station', async () => {
+    const { sid } = await client.login({ account: 'eve', password: 'eve' });
+    expect(await errorCode(client.checkFileStation(sid))).toBe('file_station_denied');
   });
 
   it('asks for Download Station when it is not there', async () => {
@@ -47,7 +53,7 @@ describe('SynologyClient', () => {
       dsm.state.downloadStation = true;
     }
     // Installed since: the next login sees it, without restarting the app.
-    expect((await login()).isManager).toBe(true);
+    expect((await login()).sid).toBeTruthy();
   });
 
   it('maps login errors', async () => {
@@ -63,7 +69,6 @@ describe('SynologyClient', () => {
   it('remembers 2FA devices', async () => {
     const first = await client.login({ account: 'bob', password: 'bob', otpCode: '123456' });
     expect(first.deviceId).toBeTruthy();
-    expect(first.isManager).toBe(false);
     const second = await client.login({
       account: 'bob',
       password: 'bob',

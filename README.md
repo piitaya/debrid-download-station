@@ -22,7 +22,7 @@
 <summary>Plus de captures</summary>
 
 <p align="center">
-  <img src="docs/screenshots/iphone-login-light.png" width="250" alt="Connexion avec un compte Synology">
+  <img src="docs/screenshots/iphone-setup-light.png" width="250" alt="Premier lancement : connexion à Download Station">
   <img src="docs/screenshots/iphone-downloads-dark.png" width="250" alt="Téléchargements, mode sombre">
   <img src="docs/screenshots/iphone-settings-light.png" width="250" alt="Réglages">
 </p>
@@ -46,8 +46,10 @@
   avec ses sous-dossiers.
 - **Suivi en direct.** Progression chez le service debrid puis dans Download Station, fichier par
   fichier, avec possibilité de réessayer ou d'arrêter.
-- **Connexion avec un compte Synology.** La validation en deux étapes est gérée, et on reste
-  connecté. Les tâches sont créées avec ce compte et apparaissent donc dans Download Station.
+- **Un compte pour l'app, un compte DSM pour Download Station.** On se connecte à l'app avec son
+  propre mot de passe. Les téléchargements sont créés avec un compte DSM choisi au premier
+  lancement, idéalement un compte dédié. L'app s'y reconnecte seule : les téléchargements
+  continuent sans personne.
 - **Pensé pour l'iPhone.** L'app s'installe sur l'écran d'accueil, passe en mode sombre
   automatiquement, et existe en français et en anglais.
 - **Léger.** Une image Docker d'environ 60 Mo (amd64 et arm64), sans base de données.
@@ -80,12 +82,29 @@ depuis le Centre de paquets).
    - chemin : le dossier créé à l'étape 1 ;
    - source : « Créer docker-compose.yml ».
 
-   Coller ensuite le contenu de [`docker-compose.yml`](docker-compose.yml) et remplacer
-   `192.168.1.10` par l'adresse IP du NAS.
+   Coller ensuite le contenu de [`docker-compose.yml`](docker-compose.yml).
 
 3. Valider : l'image est téléchargée et le conteneur démarre.
-4. Ouvrir **`http://IP-DU-NAS:8080`** et se connecter avec un compte DSM.
+4. Ouvrir **`http://IP-DU-NAS:8080`**. L'app demande de créer son compte, puis de connecter
+   Download Station : adresse du NAS (`http://IP-DU-NAS:5000`), compte DSM et mot de passe.
 5. Dans les **Réglages** (⚙︎), coller la clé API du service debrid, puis ajouter les destinations.
+
+Le premier qui ouvre l'app crée le compte : faire cette étape avant d'ouvrir l'accès depuis
+l'extérieur.
+
+### Un compte DSM dédié (conseillé)
+
+L'app n'a besoin que de Download Station et des dossiers de téléchargement. Un compte à part
+limite ce qu'elle peut faire sur le NAS :
+
+1. **Panneau de configuration** → **Utilisateur et groupe** → **Créer** : par exemple
+   `syno-debrid`, avec un mot de passe fort.
+2. **Dossiers partagés** : lecture/écriture sur les dossiers de destination (`video`…),
+   aucun accès aux autres.
+3. **Applications** : n'autoriser que **Download Station** et **File Station**.
+
+Les fichiers téléchargés appartiennent alors à ce compte ; les droits des dossiers partagés
+restent ceux du NAS.
 
 `PUID` et `PGID` indiquent à qui appartiennent les fichiers de `./data`. `1026:100` correspond au
 premier utilisateur créé sur le NAS et au groupe `users` ; la commande `id`, en SSH, permet de le
@@ -105,49 +124,51 @@ Dans **Container Manager** :
 
 Ailleurs : `docker compose pull && docker compose up -d`.
 
-Réglages, clés API, sessions et téléchargements en cours sont dans le dossier `data` du projet :
-c'est lui qu'il faut sauvegarder. Il contient aussi les mots de passe chiffrés et leur clé : la
-sauvegarde doit rester privée.
+Compte, réglages, clés API, sessions et téléchargements en cours sont dans le dossier `data` du
+projet : c'est lui qu'il faut sauvegarder. Il contient aussi le mot de passe chiffré du compte
+DSM et sa clé : la sauvegarde doit rester privée.
 
 ## Configuration
 
-Tout se règle par variables d'environnement. Les clés API et les destinations se règlent aussi
-depuis la page Réglages.
+Le compte, la connexion à Download Station, les clés API et les destinations se règlent dans
+l'app. Le reste passe par des variables d'environnement.
 
-| Variable                                                    | Par défaut          | Rôle                                                                                   |
-| ----------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------- |
-| `SYNOLOGY_URL`                                              | **obligatoire**     | Adresse de DSM vue depuis le conteneur, par exemple `http://192.168.1.10:5000`.        |
-| `SYNOLOGY_INSECURE_TLS`                                     | `false`             | Accepte le certificat auto-signé de DSM, en HTTPS.                                     |
-| `ALLDEBRID_API_KEY`, `REALDEBRID_API_KEY`, `TORBOX_API_KEY` | vide                | Clés API. Si elles sont définies ici, elles ne sont plus modifiables dans l'interface. |
-| `ALLOWED_USERS`                                             | tous                | Comptes DSM autorisés à se connecter, séparés par des virgules.                        |
-| `ADMIN_USERS`                                               | administrateurs DSM | Comptes autorisés à modifier les réglages.                                             |
-| `PUID` / `PGID`                                             | `1000` / `1000`     | Propriétaire des fichiers de `/data`.                                                  |
-| `PORT`                                                      | `8080`              | Port HTTP du conteneur.                                                                |
-| `TRUST_PROXY`                                               | `false`             | Fait confiance à `X-Forwarded-For` (derrière un proxy inversé).                        |
-| `SESSION_TTL_DAYS`                                          | `30`                | Déconnexion après ce nombre de jours sans ouvrir l'app.                                |
-| `LOG_LEVEL`                                                 | `info`              | `debug`, `info`, `warn` ou `error`.                                                    |
+| Variable                                                    | Par défaut      | Rôle                                                                                   |
+| ----------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------- |
+| `ALLDEBRID_API_KEY`, `REALDEBRID_API_KEY`, `TORBOX_API_KEY` | vide            | Clés API. Si elles sont définies ici, elles ne sont plus modifiables dans l'interface. |
+| `PUID` / `PGID`                                             | `1000` / `1000` | Propriétaire des fichiers de `/data`.                                                  |
+| `PORT`                                                      | `8080`          | Port HTTP du conteneur.                                                                |
+| `TRUST_PROXY`                                               | `false`         | Fait confiance à `X-Forwarded-For` (derrière un proxy inversé).                        |
+| `SESSION_TTL_DAYS`                                          | `30`            | Déconnexion après ce nombre de jours sans ouvrir l'app.                                |
+| `LOG_LEVEL`                                                 | `info`          | `debug`, `info`, `warn` ou `error`.                                                    |
 
-Les données (réglages, sessions, historique) sont stockées dans `/data`, dans des fichiers JSON
-lisibles uniquement par leur propriétaire, avec `secret.key`, la clé qui chiffre les mots de passe.
+Les données (compte, réglages, sessions, historique) sont stockées dans `/data`, dans des
+fichiers JSON lisibles uniquement par leur propriétaire, avec `secret.key`, la clé qui chiffre le
+mot de passe du compte DSM.
 
-## Comptes et droits
+## Comptes et sécurité
 
-- **Connexion.** Chacun se connecte avec **son propre compte DSM**. Ce compte doit avoir accès à
-  **Download Station**, et à **File Station** pour parcourir les dossiers et créer les
-  sous-dossiers. Il lui faut aussi le droit d'écriture dans les dossiers de destination.
-- **Réglages.** Ils sont réservés aux administrateurs DSM, ou aux comptes listés dans
-  `ADMIN_USERS`.
-- **Rester connecté.** DSM coupe ses sessions au bout de 7 jours. L'app garde donc le mot de
-  passe, **chiffré**, pour se reconnecter toute seule : les téléchargements continuent sans vous,
-  et vous restez connecté tant que vous ouvrez l'app au moins une fois tous les 30 jours.
-- **Mot de passe.** Il est oublié à la déconnexion, après 30 jours sans ouvrir l'app, ou dès que
-  DSM le refuse (mot de passe changé) : il faut alors se reconnecter. Il est chiffré avec une clé
-  rangée à côté, dans le dossier `data` : ce dossier doit rester privé.
-- **Validation en deux étapes.** Le code n'est demandé qu'une fois ; ensuite l'appareil est
-  mémorisé.
+- **Compte de l'app.** Il est créé au premier lancement, avec un mot de passe de 8 caractères au
+  moins, que l'on peut changer dans les Réglages ; les autres appareils sont alors déconnectés.
+  On reste connecté tant qu'on ouvre l'app au moins une fois tous les 30 jours.
+- **Mot de passe oublié.** Supprimer `account.json` du dossier `data`, puis redémarrer le
+  conteneur : l'app propose de recréer le compte, en redemandant le mot de passe du compte DSM.
+  Réglages et téléchargements sont conservés.
+- **Compte DSM.** Il lui faut **Download Station**, **File Station** (pour parcourir et créer les
+  dossiers) et l'écriture dans les dossiers de destination. L'app garde son mot de passe,
+  **chiffré**, pour se reconnecter quand DSM coupe la session (au bout de 7 jours, ou au
+  redémarrage du NAS).
+- **Mot de passe DSM changé.** L'app essaie une seule fois l'ancien, puis attend : les nouveaux
+  téléchargements passent « En attente de Download Station » jusqu'à ce que le nouveau mot de
+  passe soit saisi dans Réglages → Download Station. Ceux déjà confiés à Download Station
+  continuent.
+- **Validation en deux étapes.** Si le compte DSM l'utilise, le code n'est demandé qu'une fois,
+  lors de la connexion à Download Station.
 - **Blocage automatique de DSM.** Par défaut, DSM bloque une adresse IP après 10 échecs de
-  connexion en 5 minutes. Comme toutes les connexions passent par le conteneur, l'app limite
-  elle-même les échecs : 5 par quart d’heure et par adresse IP, 6 par tranche de 5 minutes au total.
+  connexion en 5 minutes, et toutes les connexions à DSM viennent du conteneur. L'app limite donc
+  ses propres échecs auprès de DSM (6 par tranche de 5 minutes) et ne réessaie jamais un mot de
+  passe refusé. Les connexions à l'app, elles, ne passent pas par DSM : 5 échecs par quart d'heure
+  et par adresse IP.
 
 ## Sur iPhone
 
@@ -172,7 +193,8 @@ Le plus simple et le plus sûr est un VPN : Tailscale, ou le paquet VPN Server.
 
 Sinon, utiliser le proxy inversé de DSM avec HTTPS : Panneau de configuration → Portail de
 connexion → Avancé → Proxy inversé. Source `https://debrid.mondomaine.fr`, destination
-`http://localhost:8080`, puis ajouter `TRUST_PROXY=true` au conteneur.
+`http://localhost:8080`, puis ajouter `TRUST_PROXY=true` au conteneur. Créer le compte de l'app
+avant d'ouvrir cet accès.
 
 ## Bon à savoir
 
@@ -188,10 +210,10 @@ connexion → Avancé → Proxy inversé. Source `https://debrid.mondomaine.fr`,
     à partir.
 - **AllDebrid** refuse les adresses IP de serveurs et de VPN : l'app doit tourner à domicile, et
   le NAS convient parfaitement.
-- **`SYNOLOGY_URL`.**
+- **Adresse du NAS.**
   - Depuis le conteneur, `localhost` ne désigne pas le NAS : utiliser son adresse IP.
-  - Si DSM redirige HTTP vers HTTPS, indiquer directement l'adresse HTTPS (port 5001), avec
-    `SYNOLOGY_INSECURE_TLS=true` si le certificat est auto-signé.
+  - Si DSM redirige HTTP vers HTTPS, indiquer directement l'adresse HTTPS (port 5001), en
+    activant « Certificat auto-signé » si besoin.
 
 ## Développement
 
@@ -201,16 +223,17 @@ npm run demo          # tout-en-un : http://localhost:5173, avec un faux NAS et 
 ```
 
 `npm run demo` lance l'interface (rechargement à chaud), l'API et des simulations du NAS et des
-services debrid, avec des réglages et des téléchargements d'exemple. Comptes du faux NAS :
+services debrid, avec des réglages et des téléchargements d'exemple. On s'y connecte avec
+`demo` / `demo1234`. Avec `DEMO_SEED=0`, l'app démarre comme au premier lancement ; comptes du
+faux NAS pour l'étape Download Station :
 
-- `paul` / `paul` et `admin` / `admin` : administrateurs ;
-- `marie` / `marie` : utilisateur ;
+- `syno-debrid` / `syno-debrid`, `admin` / `admin` ou `paul` / `paul` ;
 - `secure` / `secure` : validation en deux étapes, code `123456`.
 
-Pour travailler avec un vrai NAS, copier `.env.example` en `.env`, y mettre l'adresse du NAS puis
-lancer `npm run dev` (API sur :8080, interface sur http://localhost:5173). Les adresses des
-services debrid sont intégrées : rien à renseigner. `npm run dev:mock` lance seulement les
-simulations, sur le port 5055 (lignes « Without a NAS » de `.env.example`).
+Pour travailler avec un vrai NAS, copier `.env.example` en `.env` puis lancer `npm run dev` (API
+sur :8080, interface sur http://localhost:5173) : l'adresse du NAS se saisit dans l'app. Les
+adresses des services debrid sont intégrées. `npm run dev:mock` lance seulement les simulations,
+sur le port 5055 (lignes « Without a NAS » de `.env.example`).
 
 ```bash
 npm test              # tests (Vitest)
@@ -222,14 +245,14 @@ npm run screenshots   # régénère les captures du README (Chromium)
 Stack : Node.js 24, TypeScript, [Hono](https://hono.dev) côté serveur,
 [Lit](https://lit.dev) et [Vite](https://vite.dev) côté interface.
 
-| Dossier              | Contenu                                                             |
-| -------------------- | ------------------------------------------------------------------- |
-| `src/server/`        | API, sessions, suivi des téléchargements (`jobs.ts`)                |
-| `src/server/nas/`    | Client DSM : connexion, Download Station, File Station              |
-| `src/server/debrid/` | AllDebrid, Real-Debrid, TorBox                                      |
-| `src/web/`           | Interface (composants Lit)                                          |
-| `src/shared/`        | Types de l'API, lecture des liens magnet et des `.torrent`          |
-| `test/`              | Tests, et simulations du NAS et des services debrid (`test/mocks/`) |
+| Dossier              | Contenu                                                              |
+| -------------------- | -------------------------------------------------------------------- |
+| `src/server/`        | API, compte, connexion au NAS, suivi des téléchargements (`jobs.ts`) |
+| `src/server/nas/`    | Client DSM : connexion, Download Station, File Station               |
+| `src/server/debrid/` | AllDebrid, Real-Debrid, TorBox                                       |
+| `src/web/`           | Interface (composants Lit)                                           |
+| `src/shared/`        | Types de l'API, lecture des liens magnet et des `.torrent`           |
+| `test/`              | Tests, et simulations du NAS et des services debrid (`test/mocks/`)  |
 
 Les images Docker (amd64 et arm64) sont construites par GitHub Actions et publiées sur
 `ghcr.io/piitaya/syno-debrid` à chaque push sur `main` et à chaque tag `v*`.

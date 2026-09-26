@@ -10,6 +10,8 @@ export function createMockServer(options: { speed?: number } = {}) {
       paul: { password: 'paul', isManager: true },
       marie: { password: 'marie' },
       secure: { password: 'secure', otp: '123456', isManager: true },
+      // The dedicated account the README recommends.
+      'syno-debrid': { password: 'syno-debrid' },
     },
     folders: [
       '/video',

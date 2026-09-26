@@ -3,29 +3,21 @@ import type { ServerEvents } from '../shared/types.js';
 type EventName = keyof ServerEvents;
 type Listener = <K extends EventName>(event: K, data: ServerEvents[K]) => void;
 
-/** Fan-out of server-sent events, per user. */
+/** Fan-out of server-sent events to the open apps. */
 export class EventHub {
-  private readonly listeners = new Map<string, Set<Listener>>();
+  private readonly listeners = new Set<Listener>();
 
-  subscribe(username: string, listener: Listener): () => void {
-    let set = this.listeners.get(username);
-    if (!set) {
-      set = new Set();
-      this.listeners.set(username, set);
-    }
-    set.add(listener);
-    return () => {
-      set.delete(listener);
-      if (set.size === 0) this.listeners.delete(username);
-    };
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
-  /** Whether the user currently has the app open somewhere. */
-  isWatching(username: string): boolean {
-    return this.listeners.has(username);
+  /** Whether the app is open somewhere. */
+  isWatching(): boolean {
+    return this.listeners.size > 0;
   }
 
-  emit<K extends EventName>(username: string, event: K, data: ServerEvents[K]): void {
-    for (const listener of this.listeners.get(username) ?? []) listener(event, data);
+  emit<K extends EventName>(event: K, data: ServerEvents[K]): void {
+    for (const listener of this.listeners) listener(event, data);
   }
 }

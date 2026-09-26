@@ -1,5 +1,13 @@
 import type { ReactiveController, ReactiveControllerHost } from 'lit';
-import type { AppSettings, ErrorCode, JobView, SessionInfo } from '../shared/types.js';
+import type {
+  AppSettings,
+  ErrorCode,
+  JobView,
+  SessionInfo,
+  SessionStatus,
+  SetupRequest,
+  SetupResult,
+} from '../shared/types.js';
 import { api, ApiError } from './api.js';
 
 export interface Toast {
@@ -12,6 +20,8 @@ export interface Toast {
 class Store extends EventTarget {
   ready = false;
   session: SessionInfo | null = null;
+  /** First start (or account reset): the app has no account yet. */
+  setupRequired = false;
   /** Why the user was sent back to the login screen, if not by choice. */
   logoutReason: ErrorCode | null = null;
   settings: AppSettings | null = null;
@@ -43,8 +53,9 @@ class Store extends EventTarget {
     try {
       const status = await api.session();
       this.session = status.session;
+      this.setupRequired = status.reason === 'setup_required';
       if (status.session) await this.afterLogin();
-      else this.logoutReason = status.reason ?? null;
+      else if (status.reason === 'unauthorized') this.logoutReason = status.reason;
     } catch (error) {
       this.session = null;
       if (!(error instanceof ApiError && error.status === 401)) {
@@ -60,15 +71,18 @@ class Store extends EventTarget {
     this.changed();
   }
 
-  /** Signs in. Resolves to false when the 2FA code is needed. */
-  async login(username: string, password: string, otp?: string): Promise<boolean> {
-    const status = await api.login({ username, password, otp });
-    if (!status.session) return false;
-    this.session = status.session;
-    this.logoutReason = null;
-    await this.afterLogin();
-    this.changed();
-    return true;
+  async login(username: string, password: string): Promise<void> {
+    const status = await api.login({ username, password });
+    if (status.session) await this.signedIn(status.session);
+    // The account was reset meanwhile.
+    else this.reset(status.reason ?? null);
+  }
+
+  /** First start: creates the account and connects Download Station, then signs in. */
+  async setup(request: SetupRequest): Promise<SetupResult> {
+    const result = await api.setup(request);
+    if (result.ok) await this.signedIn(result.session);
+    return result;
   }
 
   async logout(): Promise<void> {
@@ -78,19 +92,28 @@ class Store extends EventTarget {
     this.reset(null);
   }
 
+  private async signedIn(session: SessionInfo): Promise<void> {
+    this.session = session;
+    this.setupRequired = false;
+    this.logoutReason = null;
+    await this.afterLogin();
+    this.changed();
+  }
+
   private async afterLogin(): Promise<void> {
     this.settings = await api.settings();
     this.connectEvents();
   }
 
-  private reset(reason: ErrorCode | null): void {
+  private reset(reason: SessionStatus['reason'] | null): void {
     this.events?.close();
     this.events = null;
     this.session = null;
     this.settings = null;
     this.jobs = [];
     this.jobsLoaded = false;
-    this.logoutReason = reason;
+    this.setupRequired = reason === 'setup_required';
+    this.logoutReason = reason === 'unauthorized' ? reason : null;
     this.changed();
   }
 
@@ -104,7 +127,6 @@ class Store extends EventTarget {
     api
       .session()
       .then((status) => {
-        // The reason (app or NAS session) picks the message on the login screen.
         if (!status.session) this.reset(status.reason ?? 'unauthorized');
       })
       .catch(() => undefined)

@@ -81,7 +81,7 @@ export function ensureDir(path: string): void {
 }
 
 /**
- * The key that encrypts the stored DSM logins: `secret.key` in the data folder, created on the
+ * The key that encrypts the stored DSM password: `secret.key` in the data folder, created on the
  * first start and only readable by its owner.
  */
 export function loadSecretKey(dir: string): Buffer {
@@ -89,7 +89,7 @@ export function loadSecretKey(dir: string): Buffer {
   try {
     const key = Buffer.from(readFileSync(path, 'utf8').trim(), 'base64');
     if (key.length === 32) return key;
-    log.warn(`Invalid key in ${path}: a new one is made, users will log in again`);
+    log.warn(`Invalid key in ${path}: a new one is made, the DSM password must be entered again`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

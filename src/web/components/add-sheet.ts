@@ -378,17 +378,12 @@ export class DdsAddSheet extends LitElement {
   }
 
   private renderNotConfigured() {
-    const admin = store.session?.user.isAdmin ?? false;
     return html`<div class="section">
       <div class="notice neutral">
         <dds-icon .path=${mdiAlertCircleOutline}></dds-icon>
         <div class="notice-text">
-          <p>${admin ? t('add.notConfigured') : t('add.notConfiguredUser')}</p>
-          ${
-            admin
-              ? html`<a href="#/settings" @click=${() => this.sheet.close()}>${t('setup.open')}</a>`
-              : nothing
-          }
+          <p>${t('add.notConfigured')}</p>
+          <a href="#/settings" @click=${() => this.sheet.close()}>${t('setup.open')}</a>
         </div>
       </div>
     </div>`;

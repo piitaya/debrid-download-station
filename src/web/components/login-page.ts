@@ -5,54 +5,46 @@ import { ApiError } from '../api.js';
 import { errorMessage, t } from '../i18n.js';
 import { mdiAlertCircleOutline } from '../icons.js';
 import { store } from '../store.js';
+import { authStyles } from './auth-styles.js';
 import './icon.js';
 import './logo.js';
 import { sharedStyles } from './styles.js';
 
 @customElement('dds-login-page')
 export class DdsLoginPage extends LitElement {
-  @state() private needOtp = false;
   @state() private busy = false;
   @state() private error: string | null = store.logoutReason
     ? errorMessage(store.logoutReason)
     : null;
+  @state() private forgot = false;
 
   @query('input[name="password"]') private passwordInput?: HTMLInputElement;
-  @query('input[name="otp"]') private otpInput?: HTMLInputElement;
 
   private async submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const data = new FormData(event.target as HTMLFormElement);
     const username = String(data.get('username') ?? '').trim();
     const password = String(data.get('password') ?? '');
-    const otp = String(data.get('otp') ?? '').trim() || undefined;
     if (!username || !password) return;
 
     this.busy = true;
     this.error = null;
     let code: ErrorCode;
     try {
-      if (await store.login(username, password, otp)) return;
-      code = 'otp_required';
+      await store.login(username, password);
+      return;
     } catch (error) {
       code = error instanceof ApiError ? error.info.code : 'internal';
     } finally {
       this.busy = false;
     }
 
-    if (code === 'otp_required') this.needOtp = true;
-    else this.error = errorMessage(code);
-    // The fields are disabled while signing in: they can take the focus once rendered again.
+    this.error = errorMessage(code);
+    if (code !== 'invalid_credentials') return;
+    // The fields are disabled while signing in: the password takes the focus once rendered again.
     await this.updateComplete;
-    const retry =
-      code === 'otp_required' || code === 'otp_invalid'
-        ? this.otpInput
-        : code === 'invalid_credentials'
-          ? this.passwordInput
-          : undefined;
-    if (!retry) return;
-    if (code !== 'otp_required') retry.value = '';
-    retry.focus();
+    this.passwordInput!.value = '';
+    this.passwordInput!.focus();
   }
 
   override render() {
@@ -86,24 +78,7 @@ export class DdsLoginPage extends LitElement {
               required
               ?disabled=${this.busy}
             />
-            ${
-              this.needOtp
-                ? html`<input
-                    name="otp"
-                    class="otp"
-                    placeholder=${t('login.otp')}
-                    aria-label=${t('login.otp')}
-                    inputmode="numeric"
-                    autocomplete="one-time-code"
-                    pattern="[0-9 ]*"
-                    maxlength="8"
-                    required
-                    ?disabled=${this.busy}
-                  />`
-                : nothing
-            }
           </div>
-          ${this.needOtp ? html`<p class="hint small secondary">${t('login.otpHint')}</p>` : nothing}
           ${
             this.error
               ? html`<div class="notice" role="alert">
@@ -116,92 +91,40 @@ export class DdsLoginPage extends LitElement {
           <button class="btn btn-primary btn-block submit" ?disabled=${this.busy}>
             ${this.busy ? html`<span class="spinner"></span>` : t('login.submit')}
           </button>
+          <button
+            type="button"
+            class="btn btn-plain link"
+            aria-expanded=${this.forgot}
+            @click=${() => (this.forgot = !this.forgot)}
+          >
+            ${t('login.forgot')}
+          </button>
+          ${this.forgot ? html`<p class="help small secondary">${this.renderForgotHelp()}</p>` : nothing}
         </form>
       </main>
     `;
   }
 
+  /** The file name is shown in monospace. */
+  private renderForgotHelp() {
+    const [before, after = ''] = t('login.forgotHelp', { file: '\u0000' }).split('\u0000');
+    return html`${before}<code>account.json</code>${after}`;
+  }
+
   static override styles = [
     sharedStyles,
+    authStyles,
     css`
-      main {
-        display: grid;
-        place-items: center;
-        min-height: 100vh;
-        min-height: 100dvh;
-        padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
-      }
-
-      form {
-        display: grid;
-        gap: 16px;
-        width: min(360px, 100%);
-      }
-
-      header {
-        display: grid;
-        justify-items: center;
-        gap: 6px;
-        margin-bottom: 12px;
-        text-align: center;
-      }
-
-      header dds-logo {
-        margin-bottom: 10px;
-      }
-
-      h1 {
-        font-size: 22px;
-        font-weight: 700;
-        letter-spacing: -0.01em;
-      }
-
-      .fields input {
-        display: block;
-        width: 100%;
-        min-height: var(--row-height);
-        padding: 0 16px;
-        border: none;
-        font: inherit;
-        font-size: 16px;
-        color: var(--text);
-        background: transparent;
-        outline: none;
-      }
-
-      .fields input + input {
-        border-top: 0.5px solid var(--separator);
-      }
-
-      .fields input::placeholder {
-        color: var(--text-tertiary);
-      }
-
-      /* Keyboard and mouse: the group shows where typing goes (touch screens show the keyboard). */
-      @media (pointer: fine) {
-        .fields:focus-within {
-          box-shadow: var(--focus-ring);
-        }
-      }
-
-      .fields .otp {
-        letter-spacing: 0.2em;
-      }
-
-      .fields .otp::placeholder {
-        letter-spacing: normal;
-      }
-
-      .hint {
+      .help {
         margin-top: -8px;
         padding: 0 16px;
+        text-align: center;
+        text-wrap: pretty;
       }
 
-      .submit {
-        min-height: 50px;
-        margin-top: 4px;
-        font-size: 17px;
-        border-radius: var(--radius-lg);
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.95em;
       }
     `,
   ];

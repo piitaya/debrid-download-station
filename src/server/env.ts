@@ -8,14 +8,6 @@ export interface Env {
   dataDir: string;
   webRoot: string;
   version: string;
-  /** Base URL of DSM, without trailing slash (`http://192.168.1.10:5000`). */
-  synologyUrl: string | null;
-  /** Accept self-signed certificates when talking to DSM over HTTPS. */
-  synologyInsecureTls: boolean;
-  /** Lowercase DSM usernames allowed to log in. Empty: any DSM user. */
-  allowedUsers: string[];
-  /** Lowercase DSM usernames allowed to change the settings. Empty: every logged-in user. */
-  adminUsers: string[];
   sessionTtlDays: number;
   /** Trust `X-Forwarded-*` headers set by a reverse proxy. */
   trustProxy: boolean;
@@ -37,30 +29,19 @@ function int(value: string | undefined, fallback: number, min: number, max: numb
   return Math.min(max, Math.max(min, parsed));
 }
 
-function list(value: string | undefined): string[] {
-  return (value ?? '')
-    .split(/[,;\s]+/)
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 function trimSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
-export function normalizeSynologyUrl(value: string | undefined): string | null {
-  const raw = value?.trim();
-  if (!raw) return null;
-  const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
-  try {
-    const url = new URL(withScheme);
-    return trimSlash(`${url.protocol}//${url.host}${url.pathname}`);
-  } catch {
-    return null;
-  }
-}
-
 const bundled = import.meta.url.endsWith('/dist/server/index.js');
+
+/** Variables of earlier versions: the NAS and the account are now set up in the app. */
+export const OBSOLETE_VARIABLES = [
+  'SYNOLOGY_URL',
+  'SYNOLOGY_INSECURE_TLS',
+  'ALLOWED_USERS',
+  'ADMIN_USERS',
+] as const;
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const production = source.NODE_ENV === 'production';
@@ -81,10 +62,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     ),
     version:
       typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : (source.npm_package_version ?? 'dev'),
-    synologyUrl: normalizeSynologyUrl(source.SYNOLOGY_URL),
-    synologyInsecureTls: bool(source.SYNOLOGY_INSECURE_TLS, false),
-    allowedUsers: list(source.ALLOWED_USERS),
-    adminUsers: list(source.ADMIN_USERS),
     sessionTtlDays: int(source.SESSION_TTL_DAYS, 30, 1, 365),
     trustProxy: bool(source.TRUST_PROXY, false),
     providerKeys,

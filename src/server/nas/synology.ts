@@ -64,6 +64,16 @@ const LEGACY_SESSION_ERRORS = new Set([105]);
 /** Codes meaning the account may not use Download Station / File Station. */
 const PERMISSION_ERRORS = new Set([105, 160, 402]);
 
+/** TLS errors of a certificate DSM made itself (or for another name). */
+const CERTIFICATE_ERRORS = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'CERT_HAS_EXPIRED',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
 const AUTH_ERRORS: Record<number, ErrorCode> = {
   400: 'invalid_credentials',
   401: 'account_disabled',
@@ -244,20 +254,23 @@ export class SynologyClient implements NasClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
-      const cause = (error as Error & { cause?: Error }).cause;
+      const cause = (error as Error & { cause?: Error & { code?: string } }).cause;
       const message = cause?.message ?? (error as Error).message;
       log.warn(`NAS unreachable (${url}): ${message}`);
+      if (cause?.code && CERTIFICATE_ERRORS.has(cause.code)) {
+        throw new AppError('nas_certificate', message);
+      }
       throw new AppError('nas_unreachable', message);
     }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location') ?? '?';
-      throw new AppError('nas_error', `SYNOLOGY_URL redirects to ${location}: use that address`);
+      throw new AppError('nas_error', `The NAS address redirects to ${location}: use that one`);
     }
     if (!response.ok) throw new AppError('nas_error', `HTTP ${response.status} on ${path}`);
     try {
       return (await response.json()) as SynoResponse<T>;
     } catch {
-      throw new AppError('nas_error', `Unexpected response from ${url} (check SYNOLOGY_URL)`);
+      throw new AppError('nas_error', `Unexpected response from ${url} (not DSM?)`);
     }
   }
 
@@ -348,38 +361,29 @@ export class SynologyClient implements NasClient {
     }
     if (!data.sid) throw new AppError('nas_error', 'Login succeeded without a session id');
 
-    // Make sure the account may use Download Station (and find out if it manages it).
-    let isManager: boolean;
+    // Make sure the account may use Download Station.
     try {
-      isManager = await this.verifyAccess(data.sid);
+      await this.checkSession(data.sid);
     } catch (error) {
       await this.logout(data.sid).catch(() => undefined);
-      throw error;
-    }
-    return { sid: data.sid, deviceId: data.did || data.device_id || null, isManager };
-  }
-
-  /** Returns whether the user is a Download Station manager (DSM administrator). */
-  private async verifyAccess(sid: string): Promise<boolean> {
-    try {
-      if (!(await this.has('SYNO.DownloadStation.Info'))) {
-        // Only the newer API, which does not tell the role: not a manager.
-        await this.checkSession(sid);
-        return false;
-      }
-      const info = await this.call<{ is_manager?: boolean }>(
-        'SYNO.DownloadStation.Info',
-        'getinfo',
-        {},
-        { sid, maxVersion: 1 },
-      );
-      return info.is_manager === true;
-    } catch (error) {
       if (
         error instanceof NasSessionError ||
         (error instanceof SynologyApiError && PERMISSION_ERRORS.has(error.synoCode))
       ) {
         throw new AppError('no_permission');
+      }
+      throw error;
+    }
+    return { sid: data.sid, deviceId: data.did || data.device_id || null };
+  }
+
+  /** Makes sure the account may use File Station (folders, renaming), right after a login. */
+  async checkFileStation(sid: string): Promise<void> {
+    try {
+      await this.listShares(sid);
+    } catch (error) {
+      if (error instanceof SynologyApiError && PERMISSION_ERRORS.has(error.synoCode)) {
+        throw new AppError('file_station_denied', error.message);
       }
       throw error;
     }

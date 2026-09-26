@@ -13,7 +13,17 @@ import type { Env } from './env.js';
 import { HttpError } from './errors.js';
 import type { JsonFile } from './storage.js';
 
+/** Connection to Download Station (see NasConnection). */
+export interface StoredNas {
+  url: string;
+  insecureTls: boolean;
+  account: string;
+  /** The DSM password and trusted-device token, encrypted. */
+  credentials: string;
+}
+
 export interface StoredSettings {
+  nas: StoredNas | null;
   apiKeys: Partial<Record<ProviderId, string>>;
   defaultProvider: ProviderId | null;
   categories: Category[];
@@ -23,6 +33,7 @@ export interface StoredSettings {
 }
 
 export const defaultSettings = (): StoredSettings => ({
+  nas: null,
   apiKeys: {},
   defaultProvider: null,
   categories: [],
@@ -87,6 +98,15 @@ export class Settings {
     return () => this.listeners.delete(listener);
   }
 
+  get nas(): StoredNas | null {
+    return this.data.nas;
+  }
+
+  setNas(nas: StoredNas): void {
+    this.file.data = { ...this.data, nas };
+    this.file.save();
+  }
+
   apiKey(id: ProviderId): string | null {
     return this.env.providerKeys[id] ?? this.data.apiKeys[id] ?? null;
   }
@@ -118,7 +138,9 @@ export class Settings {
     const defaultCategoryId = categories.some((c) => c.id === this.data.defaultCategoryId)
       ? this.data.defaultCategoryId
       : (categories[0]?.id ?? null);
+    const nas = this.data.nas;
     return {
+      nas: nas ? { url: nas.url, account: nas.account, insecureTls: nas.insecureTls } : null,
       providers: PROVIDER_IDS.map((id) => ({
         id,
         configured: this.apiKey(id) !== null,

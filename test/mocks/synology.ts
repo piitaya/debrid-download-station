@@ -10,6 +10,8 @@ export interface MockUser {
   /** When set, logging in requires this 2FA code. */
   otp?: string;
   isManager?: boolean;
+  /** False: File Station is denied to the account. */
+  fileStation?: boolean;
 }
 
 export interface MockTask {
@@ -211,6 +213,7 @@ export function createMockDsm(options: MockDsmOptions = {}) {
 
     if (!username) return c.json(fail(legacy ? 105 : 119));
     const user = users[username]!;
+    if (api.startsWith('SYNO.FileStation') && user.fileStation === false) return c.json(fail(160));
 
     if (api === 'SYNO.DownloadStation.Info') {
       return c.json({

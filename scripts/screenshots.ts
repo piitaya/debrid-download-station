@@ -1,22 +1,26 @@
 // Takes the README screenshots: runs the built app against the fake NAS and debrid services.
 // Usage: npm run build && npm run screenshots
+import { serve } from '@hono/node-server';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContextOptions, Page } from 'playwright-core';
-import { listen } from '../test/serve.js';
 import { createMockServer } from '../test/mocks/server.js';
 import { launchBrowser } from './browser.js';
 
 const OUT = new URL('../docs/screenshots/', import.meta.url).pathname;
 const PORT = 8099;
 const APP = `http://127.0.0.1:${PORT}`;
+/** The fake NAS, on DSM's port. */
+const NAS = 'http://127.0.0.1:5000';
+/** The app's account. */
+const ACCOUNT = { username: 'paul', password: 'syno-debrid' };
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 const mock = createMockServer({ speed: 40 * 1024 * 1024 });
-const mockServer = await listen(mock.app);
+const mockServer = serve({ fetch: mock.app.fetch, port: 5000, hostname: '127.0.0.1' });
 
 const dataDir = mkdtempSync(join(tmpdir(), 'dds-shots-'));
 writeFileSync(
@@ -42,10 +46,9 @@ const server = spawn('node', ['dist/server/index.js'], {
     PORT: String(PORT),
     HOST: '127.0.0.1',
     DATA_DIR: dataDir,
-    SYNOLOGY_URL: mockServer.url,
-    ALLDEBRID_API_URL: `${mockServer.url}/alldebrid`,
-    REALDEBRID_API_URL: `${mockServer.url}/realdebrid`,
-    TORBOX_API_URL: `${mockServer.url}/torbox`,
+    ALLDEBRID_API_URL: `${NAS}/alldebrid`,
+    REALDEBRID_API_URL: `${NAS}/realdebrid`,
+    TORBOX_API_URL: `${NAS}/torbox`,
     LOG_LEVEL: 'warn',
   },
   stdio: 'inherit',
@@ -94,8 +97,8 @@ async function open(browser: Browser, options: BrowserContextOptions, scheme: 'l
 
 async function login(page: Page): Promise<void> {
   await page.goto(APP);
-  await page.getByPlaceholder(/utilisateur/).fill('paul');
-  await page.getByPlaceholder('Mot de passe').fill('paul');
+  await page.getByPlaceholder(/utilisateur/).fill(ACCOUNT.username);
+  await page.getByPlaceholder('Mot de passe').fill(ACCOUNT.password);
   await page.getByRole('button', { name: 'Se connecter' }).click();
   await page.getByRole('button', { name: 'Ajouter un téléchargement' }).first().waitFor();
 }
@@ -111,6 +114,25 @@ async function shot(page: Page, name: string): Promise<void> {
 try {
   await waitForServer();
   const browser = await launchBrowser();
+
+  // First start: the account, then Download Station.
+  {
+    const { context, page } = await open(browser, iphone, 'light');
+    await page.goto(APP);
+    await page.getByPlaceholder(/utilisateur/).fill(ACCOUNT.username);
+    await page.getByPlaceholder('Mot de passe', { exact: true }).fill(ACCOUNT.password);
+    await page.getByPlaceholder('Confirmer le mot de passe').fill(ACCOUNT.password);
+    await page.getByRole('button', { name: 'Continuer' }).click();
+    await page.getByPlaceholder('http://192.168.1.10:5000').fill('http://192.168.1.10:5000');
+    await page.getByPlaceholder('Compte DSM').fill('syno-debrid');
+    await page.getByPlaceholder('Mot de passe DSM').fill('syno-debrid');
+    await page.locator('dds-setup-page input[name="nasPassword"]').blur();
+    await shot(page, 'iphone-setup-light');
+    await page.getByPlaceholder('http://192.168.1.10:5000').fill(NAS);
+    await page.getByRole('button', { name: 'Terminer' }).click();
+    await page.getByRole('button', { name: 'Ajouter un téléchargement' }).first().waitFor();
+    await context.close();
+  }
 
   // Login screen.
   {
@@ -196,5 +218,5 @@ try {
   await browser.close();
 } finally {
   server.kill('SIGTERM');
-  await mockServer.close();
+  mockServer.close();
 }
