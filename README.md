@@ -2,7 +2,7 @@
   <img src="src/web/public/icons/icon-192.png" width="96" height="96" alt="">
 </p>
 
-<h1 align="center">Debrid Download Station</h1>
+<h1 align="center">Syno Debrid</h1>
 
 <p align="center">
   Un lien magnet ou un fichier <code>.torrent</code> passe par votre service debrid, et les fichiers
@@ -57,7 +57,7 @@
 ```mermaid
 sequenceDiagram
     participant Vous as iPhone / ordinateur
-    participant App as Debrid Download Station
+    participant App as Syno Debrid
     participant Debrid as AllDebrid / Real-Debrid / TorBox
     participant DS as Download Station
     Vous->>App: lien magnet ou .torrent + destination
@@ -74,9 +74,9 @@ sequenceDiagram
 Prérequis : DSM 7.2 ou plus récent, avec **Container Manager** et **Download Station** (installés
 depuis le Centre de paquets).
 
-1. Dans **File Station**, créer un dossier `docker/debrid-download-station`.
+1. Dans **File Station**, créer un dossier `docker/syno-debrid`.
 2. Dans **Container Manager**, ouvrir **Projet → Créer** et remplir :
-   - nom : `debrid-download-station` ;
+   - nom : `syno-debrid` ;
    - chemin : le dossier créé à l'étape 1 ;
    - source : « Créer docker-compose.yml ».
 
@@ -216,7 +216,7 @@ Stack : Node.js 24, TypeScript, [Hono](https://hono.dev) côté serveur,
 | `test/`              | Tests, et simulations du NAS et des services debrid (`test/mocks/`) |
 
 Les images Docker (amd64 et arm64) sont construites par GitHub Actions et publiées sur
-`ghcr.io/piitaya/debrid-download-station` à chaque push sur `main` et à chaque tag `v*`.
+`ghcr.io/piitaya/syno-debrid` à chaque push sur `main` et à chaque tag `v*`.
 
 ## État du projet
 
@@ -224,3 +224,6 @@ L'app est testée de bout en bout contre des simulations des API : DSM, Download
 Station, AllDebrid, Real-Debrid et TorBox. Ces simulations s'appuient sur la documentation
 officielle et sur le code de clients existants. Elle n'a pas encore été essayée sur un vrai NAS ni
 avec de vrais comptes debrid : les retours sont les bienvenus.
+
+Syno Debrid n'est ni affilié à Synology, ni soutenu par Synology. Synology, DSM et Download Station
+sont des marques de Synology Inc.

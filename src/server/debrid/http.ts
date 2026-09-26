@@ -1,7 +1,7 @@
 import { AppError } from '../errors.js';
 import { log, redact } from '../logger.js';
 
-export const USER_AGENT = 'debrid-download-station';
+export const USER_AGENT = 'syno-debrid';
 const TIMEOUT_MS = 30_000;
 
 export interface HttpResult<T> {

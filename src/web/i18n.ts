@@ -6,7 +6,7 @@ import type { CategoryIcon, ErrorCode } from '../shared/types.js';
  * ? : ; ! and inside « »: `t()` puts the right no-break spaces in.
  */
 const fr = {
-  'app.name': 'Debrid Download Station',
+  'app.name': 'Syno Debrid',
 
   'nav.downloads': 'Téléchargements',
   'nav.settings': 'Réglages',
@@ -243,7 +243,7 @@ const fr = {
 export type MessageKey = keyof typeof fr;
 
 const en: Record<MessageKey, string> = {
-  'app.name': 'Debrid Download Station',
+  'app.name': 'Syno Debrid',
 
   'nav.downloads': 'Downloads',
   'nav.settings': 'Settings',

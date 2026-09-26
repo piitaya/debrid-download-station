@@ -83,7 +83,7 @@ const app = createApp({
   globalLoginLimiter: new RateLimiter(6, 5 * 60 * 1000),
 });
 
-log.info(`Debrid Download Station ${env.version}`);
+log.info(`Syno Debrid ${env.version}`);
 if (nas) log.info(`NAS: ${env.synologyUrl}${env.synologyInsecureTls ? ' (TLS not verified)' : ''}`);
 else log.warn('SYNOLOGY_URL is not set: nobody will be able to log in.');
 const configured = settings.configuredProviders();

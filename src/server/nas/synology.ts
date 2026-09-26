@@ -326,7 +326,7 @@ export class SynologyClient implements NasClient {
       passwd: params.password,
       session: 'DownloadStation',
       format: 'sid',
-      device_name: 'Debrid Download Station',
+      device_name: 'Syno Debrid',
     };
     if (params.otpCode) {
       request.otp_code = params.otpCode;
