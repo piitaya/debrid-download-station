@@ -15,7 +15,7 @@ import { log } from './logger.js';
 import type { DsTask, NasClient } from './nas/types.js';
 import { NasSessionError } from './nas/types.js';
 import { basename, dirname, isPlainName, joinPath, planDownload } from './paths.js';
-import type { Sessions } from './sessions.js';
+import type { NasLogins } from './nas-logins.js';
 import type { JsonFile } from './storage.js';
 
 export interface JobFile {
@@ -77,7 +77,7 @@ export interface NewJob {
 export interface JobDeps {
   file: JsonFile<JobsFile>;
   nas: NasClient;
-  sessions: Sessions;
+  logins: NasLogins;
   events: EventHub;
   provider: (id: ProviderId) => DebridProvider;
   options: () => { createSubfolder: boolean; deleteFromDebrid: boolean };
@@ -185,7 +185,7 @@ export class JobManager {
     if (job.phase === 'downloading') {
       // Failed files get a fresh link: debrid links may have expired.
       const failed = job.files.filter((file) => file.status === 'error');
-      const sid = this.deps.sessions.dsmSidFor(owner);
+      const sid = this.deps.logins.currentSid(owner);
       const ids = failed.map((file) => file.taskId).filter((taskId): taskId is string => !!taskId);
       if (sid && ids.length) {
         this.deps.nas.deleteTasks(sid, ids).catch(() => undefined);
@@ -216,7 +216,7 @@ export class JobManager {
     this.deps.events.emit(owner, 'job-removed', { id });
 
     if (!cancel) return;
-    const sid = this.deps.sessions.dsmSidFor(owner);
+    const sid = await this.deps.logins.sidFor(owner);
     const running = job.files
       .filter((file) => file.taskId && file.status !== 'completed')
       .map((file) => file.taskId!);
@@ -329,7 +329,8 @@ export class JobManager {
 
   private handleError(job: Job, error: unknown): void {
     if (error instanceof NasSessionError) {
-      this.deps.sessions.markDsmInvalid(error.sid);
+      // Logs in to DSM again when the password is kept; the job retries in a moment.
+      void this.deps.logins.expired(error.sid);
       if (job.status === 'sending') job.status = 'waiting_login';
       job.nextCheckAt = Date.now() + 5000;
       this.changed(job);
@@ -392,7 +393,7 @@ export class JobManager {
   }
 
   private async send(job: Job): Promise<void> {
-    const sid = this.deps.sessions.dsmSidFor(job.owner);
+    const sid = await this.deps.logins.sidFor(job.owner);
     if (!sid) {
       if (job.status !== 'waiting_login') {
         job.status = 'waiting_login';
@@ -454,7 +455,7 @@ export class JobManager {
   }
 
   private async checkDownloads(job: Job): Promise<void> {
-    const sid = this.deps.sessions.dsmSidFor(job.owner);
+    const sid = await this.deps.logins.sidFor(job.owner);
     if (!sid) {
       // Download Station keeps downloading; progress resumes once the user logs in again.
       job.nextCheckAt = Date.now() + 30_000;

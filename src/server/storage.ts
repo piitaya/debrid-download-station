@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { log } from './logger.js';
 
 /**
@@ -77,6 +78,24 @@ export class JsonFile<T> {
 
 export function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
+}
+
+/**
+ * The key that encrypts the stored DSM logins: `secret.key` in the data folder, created on the
+ * first start and only readable by its owner.
+ */
+export function loadSecretKey(dir: string): Buffer {
+  const path = join(dir, 'secret.key');
+  try {
+    const key = Buffer.from(readFileSync(path, 'utf8').trim(), 'base64');
+    if (key.length === 32) return key;
+    log.warn(`Invalid key in ${path}: a new one is made, users will log in again`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const key = randomBytes(32);
+  writeFileSync(path, `${key.toString('base64')}\n`, { mode: 0o600 });
+  return key;
 }
 
 export function ensureParentDir(path: string): void {

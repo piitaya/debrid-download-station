@@ -1,9 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { EventHub } from '../src/server/events.js';
 import { JobManager, type JobsFile } from '../src/server/jobs.js';
+import { NasLogins } from '../src/server/nas-logins.js';
 import { SynologyClient } from '../src/server/nas/synology.js';
 import { Sessions, type SessionMap } from '../src/server/sessions.js';
 import { JsonFile } from '../src/server/storage.js';
@@ -34,15 +36,16 @@ function setup(options = { createSubfolder: true, deleteFromDebrid: false }) {
   );
   const provider = new FakeProvider();
   const events = new EventHub();
+  const logins = new NasLogins(sessions, () => nas, randomBytes(32));
   const jobs = new JobManager({
     file: new JsonFile<JobsFile>(join(dir, 'jobs.json'), () => ({ jobs: [] })),
     nas,
-    sessions,
+    logins,
     events,
     provider: () => provider,
     options: () => options,
   });
-  return { jobs, sessions, provider, events };
+  return { jobs, sessions, provider, events, logins };
 }
 
 const category = { name: 'Séries', icon: 'tv' as const, destination: 'video/Séries' };
@@ -164,6 +167,26 @@ describe('JobManager', () => {
     await run(jobs);
     expect(job.status).toBe('waiting_login');
     expect(sessions.dsmSidFor('paul')).toBeNull();
+  });
+
+  it('logs in to DSM again with the stored password to carry on', async () => {
+    const { jobs, sessions, provider, logins } = setup();
+    const { sid } = await nas.login({ account: 'paul', password: 'pw' });
+    sessions.create('paul', sid, true, logins.seal({ password: 'pw', deviceId: null }));
+    const job = jobs.create({
+      owner: 'paul',
+      provider: 'alldebrid',
+      debridId: (await provider.addMagnet()).id,
+      name: 'x',
+      category,
+    });
+    // DSM drops its sessions (after 7 days, or a reboot): the download goes on by itself.
+    dsm.expireSessions();
+    await run(jobs, 2);
+    expect(job.status).toBe('downloading');
+    const renewed = sessions.dsmSidFor('paul');
+    expect(renewed).toBeTruthy();
+    expect(renewed).not.toBe(sid);
   });
 
   it('retries failed downloads with fresh links', async () => {

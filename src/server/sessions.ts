@@ -9,6 +9,8 @@ export interface StoredSession {
   dsmValid: boolean;
   /** DSM administrator (Download Station manager). */
   isManager: boolean;
+  /** Encrypted login, to log in to DSM again when it drops the session (see NasLogins). */
+  credentials?: string;
   createdAt: number;
   lastSeenAt: number;
   expiresAt: number;
@@ -21,7 +23,7 @@ const TOUCH_INTERVAL = 60 * 60 * 1000;
 
 /**
  * Browser sessions. The cookie holds a random token; only its hash is stored on disk, next to
- * the DSM sid obtained at login (the password itself is never stored).
+ * the DSM sid obtained at login and the encrypted login used to renew it.
  */
 export class Sessions {
   constructor(
@@ -39,6 +41,7 @@ export class Sessions {
     username: string,
     dsmSid: string,
     isManager: boolean,
+    credentials?: string,
   ): { token: string; session: StoredSession } {
     const token = randomBytes(32).toString('base64url');
     const now = Date.now();
@@ -47,6 +50,7 @@ export class Sessions {
       dsmSid,
       dsmValid: true,
       isManager,
+      ...(credentials ? { credentials } : {}),
       createdAt: now,
       lastSeenAt: now,
       expiresAt: now + this.ttlMs,
@@ -96,6 +100,36 @@ export class Sessions {
       if (!best || session.lastSeenAt > best.lastSeenAt) best = session;
     }
     return best?.dsmSid ?? null;
+  }
+
+  /** Sessions of a user whose DSM sid was dropped but that can log in again, latest first. */
+  renewable(username: string): StoredSession[] {
+    const now = Date.now();
+    return Object.values(this.map)
+      .filter(
+        (session) =>
+          session.username === username &&
+          !session.dsmValid &&
+          !!session.credentials &&
+          session.expiresAt > now,
+      )
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  }
+
+  withDsmSid(dsmSid: string): StoredSession[] {
+    return Object.values(this.map).filter((session) => session.dsmSid === dsmSid);
+  }
+
+  /** A new DSM login for the session. */
+  renewDsm(session: StoredSession, dsmSid: string, isManager: boolean): void {
+    Object.assign(session, { dsmSid, dsmValid: true, isManager });
+    this.file.save();
+  }
+
+  /** The stored login no longer works: the user has to log in again. */
+  forgetCredentials(session: StoredSession): void {
+    delete session.credentials;
+    this.file.save();
   }
 
   markDsmInvalid(dsmSid: string): void {

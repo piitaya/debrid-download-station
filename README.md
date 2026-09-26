@@ -46,8 +46,8 @@
   avec ses sous-dossiers.
 - **Suivi en direct.** Progression chez le service debrid puis dans Download Station, fichier par
   fichier, avec possibilité de réessayer ou d'arrêter.
-- **Connexion avec un compte Synology.** La validation en deux étapes est gérée et l'appareil est
-  mémorisé. Les tâches sont créées avec ce compte et apparaissent donc dans Download Station.
+- **Connexion avec un compte Synology.** La validation en deux étapes est gérée, et on reste
+  connecté. Les tâches sont créées avec ce compte et apparaissent donc dans Download Station.
 - **Pensé pour l'iPhone.** L'app s'installe sur l'écran d'accueil, passe en mode sombre
   automatiquement, et existe en français et en anglais.
 - **Léger.** Une image Docker d'environ 60 Mo (amd64 et arm64), sans base de données.
@@ -106,28 +106,29 @@ Dans **Container Manager** :
 Ailleurs : `docker compose pull && docker compose up -d`.
 
 Réglages, clés API, sessions et téléchargements en cours sont dans le dossier `data` du projet :
-c'est lui qu'il faut sauvegarder.
+c'est lui qu'il faut sauvegarder. Il contient aussi les mots de passe chiffrés et leur clé : la
+sauvegarde doit rester privée.
 
 ## Configuration
 
 Tout se règle par variables d'environnement. Les clés API et les destinations se règlent aussi
 depuis la page Réglages.
 
-| Variable                                                    | Par défaut          | Rôle                                                                                      |
-| ----------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
-| `SYNOLOGY_URL`                                              | **obligatoire**     | Adresse de DSM vue depuis le conteneur, par exemple `http://192.168.1.10:5000`.           |
-| `SYNOLOGY_INSECURE_TLS`                                     | `false`             | Accepte le certificat auto-signé de DSM, en HTTPS.                                        |
-| `ALLDEBRID_API_KEY`, `REALDEBRID_API_KEY`, `TORBOX_API_KEY` | vide                | Clés API. Si elles sont définies ici, elles ne sont plus modifiables dans l'interface.    |
-| `ALLOWED_USERS`                                             | tous                | Comptes DSM autorisés à se connecter, séparés par des virgules.                           |
-| `ADMIN_USERS`                                               | administrateurs DSM | Comptes autorisés à modifier les réglages.                                                |
-| `PUID` / `PGID`                                             | `1000` / `1000`     | Propriétaire des fichiers de `/data`.                                                     |
-| `PORT`                                                      | `8080`              | Port HTTP du conteneur.                                                                   |
-| `TRUST_PROXY`                                               | `false`             | Fait confiance à `X-Forwarded-For` (derrière un proxy inversé).                           |
-| `SESSION_TTL_DAYS`                                          | `30`                | Durée maximale d'une session. DSM fait de toute façon expirer ses sessions après 7 jours. |
-| `LOG_LEVEL`                                                 | `info`              | `debug`, `info`, `warn` ou `error`.                                                       |
+| Variable                                                    | Par défaut          | Rôle                                                                                   |
+| ----------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------- |
+| `SYNOLOGY_URL`                                              | **obligatoire**     | Adresse de DSM vue depuis le conteneur, par exemple `http://192.168.1.10:5000`.        |
+| `SYNOLOGY_INSECURE_TLS`                                     | `false`             | Accepte le certificat auto-signé de DSM, en HTTPS.                                     |
+| `ALLDEBRID_API_KEY`, `REALDEBRID_API_KEY`, `TORBOX_API_KEY` | vide                | Clés API. Si elles sont définies ici, elles ne sont plus modifiables dans l'interface. |
+| `ALLOWED_USERS`                                             | tous                | Comptes DSM autorisés à se connecter, séparés par des virgules.                        |
+| `ADMIN_USERS`                                               | administrateurs DSM | Comptes autorisés à modifier les réglages.                                             |
+| `PUID` / `PGID`                                             | `1000` / `1000`     | Propriétaire des fichiers de `/data`.                                                  |
+| `PORT`                                                      | `8080`              | Port HTTP du conteneur.                                                                |
+| `TRUST_PROXY`                                               | `false`             | Fait confiance à `X-Forwarded-For` (derrière un proxy inversé).                        |
+| `SESSION_TTL_DAYS`                                          | `30`                | Déconnexion après ce nombre de jours sans ouvrir l'app.                                |
+| `LOG_LEVEL`                                                 | `info`              | `debug`, `info`, `warn` ou `error`.                                                    |
 
 Les données (réglages, sessions, historique) sont stockées dans `/data`, dans des fichiers JSON
-lisibles uniquement par leur propriétaire.
+lisibles uniquement par leur propriétaire, avec `secret.key`, la clé qui chiffre les mots de passe.
 
 ## Comptes et droits
 
@@ -136,12 +137,12 @@ lisibles uniquement par leur propriétaire.
   sous-dossiers. Il lui faut aussi le droit d'écriture dans les dossiers de destination.
 - **Réglages.** Ils sont réservés aux administrateurs DSM, ou aux comptes listés dans
   `ADMIN_USERS`.
-- **Mot de passe.** Il n'est **jamais stocké** : l'app garde uniquement la session DSM, côté
-  serveur.
-- **Expiration de la session.** DSM fait expirer ses sessions au bout de 7 jours. Il faut alors
-  se reconnecter, et le trousseau iCloud remplit le formulaire tout seul. Les téléchargements déjà
-  lancés continuent. Un torrent encore chez le service debrid attend la prochaine connexion pour
-  partir vers le NAS.
+- **Rester connecté.** DSM coupe ses sessions au bout de 7 jours. L'app garde donc le mot de
+  passe, **chiffré**, pour se reconnecter toute seule : les téléchargements continuent sans vous,
+  et vous restez connecté tant que vous ouvrez l'app au moins une fois tous les 30 jours.
+- **Mot de passe.** Il est oublié à la déconnexion, après 30 jours sans ouvrir l'app, ou dès que
+  DSM le refuse (mot de passe changé) : il faut alors se reconnecter. Il est chiffré avec une clé
+  rangée à côté, dans le dossier `data` : ce dossier doit rester privé.
 - **Validation en deux étapes.** Le code n'est demandé qu'une fois ; ensuite l'appareil est
   mémorisé.
 - **Blocage automatique de DSM.** Par défaut, DSM bloque une adresse IP après 10 échecs de

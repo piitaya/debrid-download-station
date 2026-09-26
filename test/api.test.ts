@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,7 @@ import { createProvider, Providers } from '../src/server/debrid/index.js';
 import { loadEnv } from '../src/server/env.js';
 import { EventHub } from '../src/server/events.js';
 import { JobManager, type JobsFile } from '../src/server/jobs.js';
+import { NasLogins } from '../src/server/nas-logins.js';
 import { SynologyClient } from '../src/server/nas/synology.js';
 import { RateLimiter } from '../src/server/rate-limit.js';
 import { Sessions, type SessionMap } from '../src/server/sessions.js';
@@ -45,10 +47,11 @@ beforeAll(async () => {
   const events = new EventHub();
   const providers = new Providers(settings, env);
   const nas = new SynologyClient({ baseUrl: env.synologyUrl!, insecureTls: false });
+  const logins = new NasLogins(sessions, () => nas, randomBytes(32));
   jobs = new JobManager({
     file: new JsonFile<JobsFile>(join(dir, 'j.json'), () => ({ jobs: [] })),
     nas,
-    sessions,
+    logins,
     events,
     provider: (id) => providers.get(id),
     options: () => ({ createSubfolder: settings.createSubfolder, deleteFromDebrid: false }),
@@ -57,6 +60,7 @@ beforeAll(async () => {
     env,
     settings,
     sessions,
+    logins,
     jobs,
     events,
     nas,
@@ -159,6 +163,9 @@ describe('HTTP API', () => {
     });
     expect(withCode.status).toBe(200);
     expect(withCode.jar.get('dds_device')).toBeTruthy();
+    // DSM drops the session: the app logs in again as the remembered device, without a code.
+    mock.dsm.expireSessions();
+    expect((await api('GET', 'folders')).status).toBe(200);
     await api('POST', 'logout');
     // Remembered device: no code needed any more.
     expect((await api('POST', 'login', { username: 'secure', password: 'secure' })).status).toBe(
@@ -253,19 +260,32 @@ describe('HTTP API', () => {
     expect((await api('GET', 'jobs')).data.jobs).toEqual([]);
   });
 
-  it('asks to log in again when DSM drops the session', async () => {
+  it('logs in to DSM again when DSM drops the session', async () => {
     const api = client();
     await api('POST', 'login', { username: 'paul', password: 'paul' });
+    // DSM drops its sessions after 7 days: the stored login gets a new one, nothing to do.
     mock.dsm.expireSessions();
-    const folders = await api('GET', 'folders');
-    expect(folders).toMatchObject({
-      status: 401,
-      data: { error: { code: 'nas_session_expired' } },
-    });
-    expect((await api('GET', 'settings')).data.error.code).toBe('nas_session_expired');
-    expect((await api('GET', 'session')).data).toEqual({
-      session: null,
-      reason: 'nas_session_expired',
-    });
+    expect((await api('GET', 'folders')).status).toBe(200);
+
+    // Until the password changes in DSM: then the user has to log in again.
+    const logins = () => mock.dsm.state.calls.filter((call) => call === 'SYNO.API.Auth.login');
+    const before = logins().length;
+    mock.dsm.users.paul!.password = 'changed';
+    mock.dsm.expireSessions();
+    try {
+      expect(await api('GET', 'folders')).toMatchObject({
+        status: 401,
+        data: { error: { code: 'nas_session_expired' } },
+      });
+      expect((await api('GET', 'settings')).data.error.code).toBe('nas_session_expired');
+      expect((await api('GET', 'session')).data).toEqual({
+        session: null,
+        reason: 'nas_session_expired',
+      });
+      // The refused login is forgotten: DSM does not see it again (failed logins get IPs blocked).
+      expect(logins().length - before).toBe(1);
+    } finally {
+      mock.dsm.users.paul!.password = 'paul';
+    }
   });
 });

@@ -27,6 +27,7 @@ import { AppError, HttpError, toErrorInfo } from './errors.js';
 import type { EventHub } from './events.js';
 import type { JobManager } from './jobs.js';
 import { log } from './logger.js';
+import type { NasLogins } from './nas-logins.js';
 import { NasSessionError, type NasClient } from './nas/types.js';
 import { joinPath, sanitizeSegment } from './paths.js';
 import type { RateLimiter } from './rate-limit.js';
@@ -37,6 +38,8 @@ export interface AppDeps {
   env: Env;
   settings: Settings;
   sessions: Sessions;
+  /** Keeps the users' DSM sessions going. */
+  logins: NasLogins;
   jobs: JobManager;
   events: EventHub;
   nas: NasClient | null;
@@ -84,7 +87,7 @@ const STATUS_BY_CODE: Partial<Record<ErrorCode, ContentfulStatusCode>> = {
 };
 
 export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
-  const { env, settings, sessions, jobs, events } = deps;
+  const { env, settings, sessions, logins, jobs, events } = deps;
   const lastSessionCheck = new Map<string, number>();
 
   const app = new Hono<{ Variables: Vars }>();
@@ -145,17 +148,19 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     return deps.nas;
   };
 
-  /** Runs a NAS call with the user's DSM session, flagging the session when DSM rejects it. */
+  /**
+   * Runs a NAS call with the user's DSM session. When DSM dropped it, logs in again with the
+   * stored login and makes the call once more.
+   */
   const withNas = async <T>(c: Ctx, call: (client: NasClient, sid: string) => Promise<T>) => {
     const session = c.get('session');
     try {
       return await call(nas(), session.dsmSid);
     } catch (error) {
-      if (error instanceof NasSessionError) {
-        sessions.markDsmInvalid(session.dsmSid);
-        throw new HttpError(401, 'nas_session_expired');
-      }
-      throw error;
+      if (!(error instanceof NasSessionError)) throw error;
+      await logins.expired(session.dsmSid);
+      if (!session.dsmValid) throw new HttpError(401, 'nas_session_expired');
+      return call(nas(), session.dsmSid);
     }
   };
 
@@ -182,7 +187,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     const token = getCookie(c, SESSION_COOKIE);
     const session = sessions.get(token);
     if (!session || !token) throw new HttpError(401, 'unauthorized');
-    if (!session.dsmValid) throw new HttpError(401, 'nas_session_expired');
+    if (!(await logins.revive(session))) throw new HttpError(401, 'nas_session_expired');
     c.set('session', session);
     c.set('token', token);
     await next();
@@ -249,7 +254,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
     }
     deps.loginLimiter.reset(ip);
 
-    const { token, session } = sessions.create(username, result.sid, result.isManager);
+    // The password is kept (encrypted) to log in again when DSM drops the session.
+    const credentials = logins.seal({ password, deviceId: result.deviceId ?? deviceId ?? null });
+    const { token, session } = sessions.create(username, result.sid, result.isManager, credentials);
     const secure = isHttps(c);
     setCookie(c, SESSION_COOKIE, token, {
       httpOnly: true,
@@ -283,7 +290,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: Vars }> {
       return c.json({ session: null, reason: 'unauthorized' } satisfies SessionStatus);
     }
     const nasExpired = { session: null, reason: 'nas_session_expired' } satisfies SessionStatus;
-    if (!session.dsmValid) return c.json(nasExpired);
+    if (!(await logins.revive(session))) return c.json(nasExpired);
     c.set('session', session);
     c.set('token', token);
     // Makes sure DSM still accepts the session from time to time.

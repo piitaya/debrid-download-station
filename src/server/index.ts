@@ -12,9 +12,10 @@ import { SynologyClient } from './nas/synology.js';
 import { dropPrivileges } from './privileges.js';
 import { NasSessionError, type NasClient } from './nas/types.js';
 import { RateLimiter } from './rate-limit.js';
+import { NasLogins } from './nas-logins.js';
 import { Sessions, type SessionMap } from './sessions.js';
 import { defaultSettings, Settings, type StoredSettings } from './settings.js';
-import { ensureDir, JsonFile } from './storage.js';
+import { ensureDir, JsonFile, loadSecretKey } from './storage.js';
 
 const KEEP_ALIVE_MS = 10 * 60 * 1000;
 
@@ -56,10 +57,12 @@ const noNas: NasClient = {
   deleteTasks: unavailable,
 };
 
+const logins = new NasLogins(sessions, () => nas ?? noNas, loadSecretKey(env.dataDir));
+
 const jobs = new JobManager({
   file: jobsFile,
   nas: nas ?? noNas,
-  sessions,
+  logins,
   events,
   provider: (id: ProviderId) => providers.get(id),
   options: () => ({
@@ -72,6 +75,7 @@ const app = createApp({
   env,
   settings,
   sessions,
+  logins,
   jobs,
   events,
   nas,
@@ -96,7 +100,7 @@ const server = serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (
 });
 jobs.start();
 
-// Keeps DSM sessions alive (and notices those DSM dropped, e.g. after a reboot).
+// Keeps DSM sessions alive, and renews those DSM dropped (after 7 days, or a reboot).
 const keepAlive = setInterval(async () => {
   sessions.purgeExpired();
   if (!nas) return;
@@ -104,7 +108,7 @@ const keepAlive = setInterval(async () => {
     try {
       await nas.checkSession(sid);
     } catch (error) {
-      if (error instanceof NasSessionError) sessions.markDsmInvalid(sid);
+      if (error instanceof NasSessionError) await logins.expired(sid);
     }
   }
 }, KEEP_ALIVE_MS);

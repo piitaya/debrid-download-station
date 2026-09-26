@@ -331,6 +331,8 @@ export function createMockDsm(options: MockDsmOptions = {}) {
   return {
     app,
     state,
+    /** Accounts, e.g. to change a password. */
+    users,
     tasks,
     folders,
     sessions,
